@@ -1,0 +1,191 @@
+
+package com.tencent.open.wpa;
+
+import java.io.UnsupportedEncodingException;
+import java.util.List;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.net.Uri;
+import android.text.TextUtils;
+import android.util.Base64;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.TDialog;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+
+public class WPA extends BaseApi {
+    public final static String CHAT_TYPE_WPA = "wpa";
+    public final static String CHAT_TYPE_GROUP = "group";
+    
+    public WPA(Context context, QQAuth qqAuth, QQToken token) {
+        super(qqAuth, token);
+    }
+
+    public WPA(Context context, QQToken token) {
+        super(token);
+    }
+
+    public WPA(QQToken token){
+        super(token);
+    }
+
+    public void getWPAUserOnlineState(String uin, IUiListener listener) {
+        try {
+            if (uin == null) {
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_WAP_STATE,
+                                Constants.VIA_REPORT_TYPE_WPA_STATE, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                                Constants.VIA_RESULT_FAIL);
+                throw new Exception("uin null");
+            }
+            if (uin.length() < 5) {
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_WAP_STATE,
+                                Constants.VIA_REPORT_TYPE_WPA_STATE, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                                Constants.VIA_RESULT_FAIL);
+                throw new Exception("uin length < 5");
+            }
+            for (int i = 0; i < uin.length(); i++) {
+                if (!Character.isDigit(uin.charAt(i))) {
+                    OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                            Constants.VIA_WAP_STATE, Constants.VIA_REPORT_TYPE_WPA_STATE,
+                            Constants.VIA_ACT_TYPE_EIGHTEEN,
+                            Constants.VIA_RESULT_FAIL);
+                    throw new Exception("uin not digit");
+                }
+            }
+        } catch (Exception e) {
+            if (listener != null) {
+                listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR, null));
+            }
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_WAP_STATE,
+                    Constants.VIA_REPORT_TYPE_WPA_STATE, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+        String url = "http://webpresence.qq.com/getonline?Type=1&";
+        url += uin + ":";
+        TempRequestListener requestListner = new TempRequestListener(listener);
+        HttpUtils.requestAsync(mToken, Global.getContext(), url, null, Constants.HTTP_GET,
+                requestListner);
+
+        OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_WAP_STATE,
+                Constants.VIA_REPORT_TYPE_WPA_STATE, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_SUCCESS);
+    }
+
+    /**
+     * 通过传入uin唤起会话界面，uin为QQ号码。
+     * 
+     * @param activity
+     * @param uin
+     *            QQ号码
+     * @param text
+     *            附加信息
+     * @return int
+     *         0: success
+     *         -1: uin is empty
+     *         -2: no browser
+     *         -3: length < 5
+     *         -4: uin not digits
+     */
+    public int startWPAConversation(Activity activity, String uin, String text) {
+        return startWPAConversation(activity, CHAT_TYPE_WPA, uin, text);
+    }
+
+    /**
+     * 通过传入uin唤起会话界面，uin可以是QQ号码或是群号码。<br>
+     * 
+     * 群会话应该满足两个条件：<br>
+     * 1. 手Q已经登陆
+     * 2. 群号码为登陆QQ的群号码 <br>
+     * 
+     * @param activity
+     * @param chatType
+     *            WAP.CHAT_TYPE_WPA: QQ会话
+     *            WAP.CHAT_TYPE_GROUP: 群会话
+     * @param uin
+     *            QQ号码或群号码
+     * @param text
+     *            附加信息
+     * @return int
+     *         0: success <br>
+     *         -1: uin is empty <br>
+     *         -2: no browser <br>
+     *         -3: length < 5 <br>
+     *         -4: uin not digits <br>
+     *         -5: unkonwn chat type <br>
+     */
+    public int startWPAConversation(Activity activity, String chatType, String uin, String text) {
+        if (chatType == null || !(chatType.equals(CHAT_TYPE_WPA) || chatType.equals(CHAT_TYPE_GROUP))) {
+            return -5;
+        }
+        String viaWpaReportType = Constants.VIA_REPORT_TYPE_START_WAP;
+        if (chatType.equals(CHAT_TYPE_GROUP)) {
+            viaWpaReportType = Constants.VIA_REPORT_TYPE_START_GROUP;
+        }
+        final String WPA_SCHEME_STR = "mqqwpa://im/chat?chat_type=%1$s&uin=%2$s&version=1&src_type=app&attach_content=%3$s";
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        if (TextUtils.isEmpty(uin)) {
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_START_WAP,
+                    viaWpaReportType, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return -1;
+        }
+
+        if (uin.length() < 5) {
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_START_WAP,
+                    viaWpaReportType, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return -3;
+        }
+
+        for (int i = 0; i < uin.length(); i++) {
+            if (!Character.isDigit(uin.charAt(i))) {
+                OpenSdkStatic.getInstance()
+                        .reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_START_WAP,
+                        viaWpaReportType, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                                Constants.VIA_RESULT_FAIL);
+                return -4;
+            }
+        }
+
+        String base64Text = "";
+        if (!TextUtils.isEmpty(text)) {
+            try {
+                base64Text = Base64.encodeToString(text.getBytes("UTF-8"), Base64.NO_WRAP);
+            } catch (UnsupportedEncodingException e) {
+            }
+        }
+
+        Uri uri = Uri.parse(String.format(WPA_SCHEME_STR, chatType, uin, base64Text));
+        intent.setData(uri);
+        PackageManager pm = Global.getContext().getPackageManager();
+        List<ResolveInfo> resolveInfo = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+        int ret = 0;
+        if (resolveInfo.size() > 0) {
+            activity.startActivity(intent);
+        } else {
+            intent.setData(Uri.parse("http://www.myapp.com/forward/a/45592?g_f=990935"));
+            resolveInfo = pm.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY);
+            if (resolveInfo.size() > 0) {
+                new TDialog(activity, "", getCommonDownloadQQUrl(""), null, mToken).show();
+            } else {
+                OpenSdkStatic.getInstance()
+                        .reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_START_WAP,
+                        viaWpaReportType, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                                Constants.VIA_RESULT_FAIL);
+                ret = -2;
+            }
+        }
+
+        OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_START_WAP,
+                viaWpaReportType, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_SUCCESS);
+        return ret;
+    }
+}

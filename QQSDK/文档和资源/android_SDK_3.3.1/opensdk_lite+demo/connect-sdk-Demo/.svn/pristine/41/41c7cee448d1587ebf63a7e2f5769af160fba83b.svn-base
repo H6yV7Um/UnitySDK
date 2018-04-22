@@ -1,0 +1,260 @@
+/**
+ * Name : SLog.java<br>
+ * Copyright : Copyright (c) Tencent Inc. All rights reserved.<br>
+ * Description : OpenSdk Log system<br>
+ */
+
+package com.tencent.open.log;
+
+import java.io.File;
+
+import android.os.Environment;
+import android.text.TextUtils;
+
+import com.tencent.connect.common.Constants;
+import com.tencent.open.utils.Global;
+import com.tencent.open.log.LogUtils.StorageInfo;
+import com.tencent.open.log.LogUtils.StorageDash;
+
+/**
+ * OpenSDK 日志系统<br>
+ *
+ * <pre>
+ * v: 详尽(VERBOSE) —— 最基础的、最详细的信息
+ * d: 调试(DEBUG) —— 对于调试有帮助的信息
+ * i: 信息(INFO) —— 程序执行的关键点、关键信息
+ * w: 警告(WARN) —— 不影响程序执行，但非常态或可能引起问题的信息
+ * e: 错误(ERROR) —— 错误信息
+ * u: 断言(ASSERT) —— 关键错误信息，判断bug的依据，默认会输出到日志文件
+ * </pre>
+ *
+ * @author lewistian
+ */
+public class SLog implements TraceLevel
+{
+    public static SLog instance = null;
+    protected FileTracer fileTracer;
+    protected static final FileTracerConfig CLIENT_CONFIG;
+    public static final String TAG = LogConstants.OpenSDK_TAG;
+
+    private static boolean isFirst = false;
+    
+    static {
+        int blockCount = LogConstants.DefFileBlockCount;
+        long keepPeriod = LogConstants.DefFileKeepPeriod;
+
+        File rootPath = getLogFilePath();
+
+        CLIENT_CONFIG = new FileTracerConfig(rootPath, blockCount, LogConstants.FileBlockSize,
+                LogConstants.DataThreshold, LogConstants.ClientFileTracerName, LogConstants.TimeThreshold,
+                FileTracerConfig.PRIORITY_BACKGROUND, LogConstants.ClientFileExt, keepPeriod);
+    }
+
+    public static SLog getInstance()
+    {
+        if (instance == null)
+        {
+            synchronized (SLog.class)
+            {
+                if (instance == null)
+                {
+                    instance = new SLog();
+                    isFirst = true;
+                }
+            }
+        }
+
+        return instance;
+    }
+
+    private SLog() {
+        super();
+
+        fileTracer = new FileTracer(CLIENT_CONFIG);
+    }
+
+    protected void trace(int level, String tag, String msg, Throwable tr) {
+    	if(isFirst) {
+    		String subFilePath = Global.getPackageName();
+            if (TextUtils.isEmpty(subFilePath)) {
+                subFilePath = "default";
+            } else {
+            	subFilePath = subFilePath + " SDK_VERSION:" +  Constants.SDK_VERSION;
+        		if (fileTracer == null) {
+                    return;
+                }
+        		LogcatTracer.Instance.trace(ASSERT, Thread.currentThread(), System.currentTimeMillis(), SLog.TAG, subFilePath, null);
+                fileTracer.trace(ASSERT, Thread.currentThread(), System.currentTimeMillis(), SLog.TAG, subFilePath, null);
+        		isFirst = false;
+            }
+    	}
+        // Logcat日志最终系统
+        LogcatTracer.Instance.trace(level, Thread.currentThread(), System.currentTimeMillis(), tag, msg, tr);
+
+        // 检测是否允许文件日志追踪
+        if (LogUtils.Bit.has(LogConstants.DefFileTraceLevel, level)) {
+            if (fileTracer == null) {
+                return;
+            }
+            fileTracer.trace(level, Thread.currentThread(), System.currentTimeMillis(), tag, msg, tr);
+        }
+    }
+
+    // ------------------------------------------------------------------------------
+    // 日志打印方法
+    // ------------------------------------------------------------------------------
+    /**
+     * 日志级别：详尽
+     */
+    public static final void v(String tag, String msg)
+    {
+        getInstance().trace(TraceLevel.VERBOSE, tag, msg, null);
+    }
+
+    /**
+     * 日志级别：详尽
+     */
+    public static final void v(String tag, String msg, Throwable tr)
+    {
+        getInstance().trace(TraceLevel.VERBOSE, tag, msg, tr);
+    }
+
+    /**
+     * 日志级别：调试
+     */
+    public static final void d(String tag, String msg)
+    {
+        getInstance().trace(TraceLevel.DEBUG, tag, msg, null);
+    }
+
+    /**
+     * 日志级别：调试
+     */
+    public static final void d(String tag, String msg, Throwable tr)
+    {
+        getInstance().trace(TraceLevel.DEBUG, tag, msg, tr);
+    }
+
+    /**
+     * 日志级别：信息
+     */
+    public static final void i(String tag, String msg)
+    {
+        getInstance().trace(TraceLevel.INFO, tag, msg, null);
+    }
+
+    /**
+     * 日志级别：信息
+     */
+    public static final void i(String tag, String msg, Throwable tr)
+    {
+        getInstance().trace(TraceLevel.INFO, tag, msg, tr);
+    }
+
+    /**
+     * 日志级别：警告
+     */
+    public static final void w(String tag, String msg)
+    {
+        getInstance().trace(TraceLevel.WARN, tag, msg, null);
+    }
+
+    /**
+     * 日志级别：警告
+     */
+    public static final void w(String tag, String msg, Throwable tr)
+    {
+        getInstance().trace(TraceLevel.WARN, tag, msg, tr);
+    }
+
+    /**
+     * 日志级别：错误
+     */
+    public static final void e(String tag, String msg)
+    {
+        getInstance().trace(TraceLevel.ERROR, tag, msg, null);
+    }
+
+    /**
+     * 日志级别：错误
+     */
+    public static final void e(String tag, String msg, Throwable tr)
+    {
+        getInstance().trace(TraceLevel.ERROR, tag, msg, tr);
+    }
+
+    /**
+     * 日志级别：关键错误，默认输出到本地log文件
+     */
+    public static final void u(String tag, String msg) {
+        getInstance().trace(TraceLevel.ASSERT, tag, msg, null);
+    }
+
+    /**
+     * 日志级别：关键错误，默认输出到本地log文件
+     */
+    public static final void u(String tag, String msg, Throwable tr) {
+        getInstance().trace(TraceLevel.ASSERT, tag, msg, tr);
+    }
+
+    /**
+     * 确保日志全部写入文件
+     */
+    public static void flushLogs()
+    {
+        getInstance().flush();
+    }
+
+    /**
+     * 关闭打开的文件等，一般在Activity的onDestroy调用
+     */
+    public static void release() {
+        synchronized (SLog.class) {
+            getInstance().stop();
+            if (null != instance) {
+                instance = null;
+            }
+        }
+    }
+
+    /**
+     * 获得日志文件路径
+     *
+     * @return 文件对象
+     */
+    protected static File getLogFilePath() {
+        boolean useExternal = false;
+        String path = LogConstants.FileRoot;
+
+        try {
+            StorageInfo info = StorageDash.getExternalInfo();
+            if (info != null) {
+                if (info.getAvailableSize() > LogConstants.MinSpaceRequired) {
+                    useExternal = true;
+                }
+            }
+        } catch (Throwable e) {
+            e.printStackTrace();
+        }
+
+        if (useExternal) {
+            return new File(Environment.getExternalStorageDirectory(), path);
+        } else {
+            return new File(Global.getFilesDir(), path);
+        }
+    }
+
+    protected void stop() {
+        if (fileTracer != null) {
+            fileTracer.flush();
+            fileTracer.quit();
+            fileTracer = null;
+        }
+    }
+
+    protected void flush() {
+        if (fileTracer != null) {
+            fileTracer.flush();
+        }
+    }
+}

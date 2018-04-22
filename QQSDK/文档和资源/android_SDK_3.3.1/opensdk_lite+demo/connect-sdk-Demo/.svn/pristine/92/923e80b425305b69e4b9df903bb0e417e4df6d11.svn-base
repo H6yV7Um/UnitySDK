@@ -1,0 +1,49 @@
+
+package com.tencent.open.report;
+
+import com.tencent.connect.common.Constants;
+
+/**
+ * 本类包含了cgi监控批量上报用到的常量
+ *
+ * @author toddzhao
+ */
+
+public class ReportComm {
+
+    public static final String URL = "http://wspeed.qq.com/w.cgi";//"http://172.25.36.43:8099/w.cgi";//"http://wspeed.qq.com/w.cgi";
+
+    public static final String APP_ID = "appid";
+    public static final String APP_ID_MM = "1000002";
+    public static final String APP_ID_VALUE_FOR_CGI = "1000067";
+//    public static final String APP_ID_VALUE_FOR_API = "1000069";
+    public static final String APP_ID_VALUE_FOR_API = "1000067";
+    public static final String SDK_VERSION = "releaseversion";
+    //public static final String SDK_VERSION_VALUE = "QQConnect_SDK_Android_1_7";
+    public static final String DEVICE = "device";
+    public static final String DEVICE_INFO = "deviceinfo";
+    public static final String TO_UIN = "touin";
+    public static final String QUA = "qua";
+    public static final String QUA_VALUE = Constants.SDK_QUA;
+
+    public static final String APN = "apn";
+    public static final String FREQUENCY = "frequency";
+    public static final String COMMAND_ID = "commandid";
+    public static final String RESULT_CODE = "resultcode";
+    public static final String TIME_COST = "tmcost";
+    public static final String REQUEST_SIZE = "reqsize";
+    public static final String RESPONSE_SIZE = "rspsize";
+    public static final String DETAIL = "detail";
+
+    public static final int REPORT_MAX = 5;
+    public static final int REPORT_FREQUENCY = 10;
+    public static final int REPORT_FREQUENCY_SUCCESS = 10;
+    public static final int REPORT_FREQUENCY_FAILED = 100;
+    public static final int REPORT_RETRY_COUNT = 3;
+    public static final long REPORT_TIME_INTERVAL = 20*60;
+
+    public static final String DB_NAME = "sdk_cgi_report.db";
+    public static final int DB_VERSION = 2;
+    public static final String TABLE_NEW_DATA = "newdata";
+    public static final String TABLE_OLD_DATA = "olddata";
+}

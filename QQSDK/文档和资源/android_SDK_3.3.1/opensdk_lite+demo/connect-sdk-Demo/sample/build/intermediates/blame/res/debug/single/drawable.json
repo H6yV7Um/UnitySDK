@@ -1,0 +1,18 @@
+[
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\drawable\\image_add_item_selector.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\drawable\\image_add_item_selector.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\drawable\\image_add_item_selector.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\drawable\\image_add_item_selector.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\drawable\\btn_base_back.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\drawable\\btn_base_back.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\drawable\\btn_base_back.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\drawable\\btn_base_back.xml"
+    }
+]

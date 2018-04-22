@@ -1,0 +1,60 @@
+package com.tencent.open.web.security;
+
+import com.tencent.open.log.SLog;
+
+import android.view.KeyEvent;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputConnectionWrapper;
+
+public class CaptureInputConnection extends InputConnectionWrapper {
+
+    private static final String TAG = SLog.TAG + ".CaptureInputConnection";
+	public static String keycode;
+	public static boolean BackSpaceflag = false;
+	public static boolean callFlag = false;
+
+	public CaptureInputConnection(InputConnection target, boolean mutable) {
+		super(target, mutable);
+
+	}
+
+	@Override
+	public boolean setComposingText(CharSequence text, int newCursorPosition) {
+		callFlag = true;
+		keycode = text.toString();
+		SLog.v(TAG, "-->setComposingText: " + text.toString());
+		return super.setComposingText(text, newCursorPosition);
+	}
+
+	@Override
+	public boolean commitText(CharSequence text, int newCursorPosition) {
+		callFlag = true;
+		keycode = text.toString();
+		SLog.v(TAG, "-->commitText: " + text.toString());
+		return super.commitText(text, newCursorPosition);
+	}
+
+	@Override
+	public boolean sendKeyEvent(KeyEvent event) {
+		if (event.getAction() == KeyEvent.ACTION_DOWN) {
+			SLog.i(TAG, "sendKeyEvent");
+			int uniCode = event.getUnicodeChar();
+			
+			keycode = String.valueOf((char)uniCode);
+			callFlag = true;
+			
+            SLog.d(TAG, "s: " + keycode);
+		}
+		SLog.d(TAG, "-->sendKeyEvent: " + keycode);
+
+		// 这里设置退格键的时间不对，晚于光标的移动，光标移动的接口函数不能实时获取到退格标志位
+		// if (event.getKeyCode() == KeyEvent.KEYCODE_DEL) {
+		// Log.i(TAG, "KeyEvent.KEYCODE_DEL");
+		// BackSpaceflag = true;
+		// }
+		// // 重新设置退格键标志
+		// BackSpaceflag = false;
+		
+		return super.sendKeyEvent(event);
+	}
+}

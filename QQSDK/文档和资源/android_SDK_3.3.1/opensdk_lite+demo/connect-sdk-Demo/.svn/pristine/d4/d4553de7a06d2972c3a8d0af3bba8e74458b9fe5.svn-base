@@ -1,0 +1,810 @@
+package com.tencent.open.report;
+
+import java.io.IOException;
+import java.io.Serializable;
+import java.net.SocketTimeoutException;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Random;
+import java.util.TimeZone;
+import java.util.concurrent.Executor;
+
+import org.apache.http.HttpResponse;
+import org.apache.http.StatusLine;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.conn.ConnectTimeoutException;
+import org.apache.http.entity.ByteArrayEntity;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.os.Bundle;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Message;
+import android.os.Process;
+import android.os.SystemClock;
+import android.text.TextUtils;
+
+import com.tencent.connect.common.Constants;
+import com.tencent.open.utils.OpenConfig;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.HttpUtils.HttpStatusException;
+import com.tencent.open.utils.HttpUtils.NetworkUnavailableException;
+import com.tencent.open.utils.ThreadManager;
+import com.tencent.open.utils.Util;
+import com.tencent.open.utils.Util.Statistic;
+
+/**
+ * SDK数据上报接口，包含cgi和via上报，弃用应用中心部分上报，并解耦
+ * 
+ * @author zanyli, hamlingong
+ *
+ */
+public class ReportManager {
+	public static final String URL_REPORT_CGI = "http://wspeed.qq.com/w.cgi";
+	public static final String URL_REPORT_VIA = "http://appsupport.qq.com/cgi-bin/appstage/mstats_batch_report";
+    public static final String URL_HABO_CGI = "http://c.isdspeed.qq.com/code.cgi";
+
+    // MM系统的命令字统计维度
+	protected static final String COMMAND_REPORT_VIA = "mapp_apptrace_sdk";
+
+	public static final String REPORT_CGI = "report_cgi";
+	public static final String REPORT_VIA = "report_via";
+
+	protected static final int MSG_REPORT_CGI = 1000;
+	protected static final int MSG_REPORT_VIA = 1001;
+
+    // 默认间隔时间与上报条数
+	protected static final int DEFAULT_INTERVAL = 10000;
+    protected static final int DEFAULT_MAX_COUNT = 5;
+
+    // 常规上报字段
+	public static final String DATA_APN = "apn";
+	public static final String DATA_FREQUENCY = "frequency";
+	public static final String DATA_COMMAND = "commandid";
+	public static final String DATA_RESULTCODE = "resultCode";
+	public static final String DATA_TIMECOST = "timeCost";
+	public static final String DATA_REQSIZE = "reqSize";
+	public static final String DATA_RSPSIZE = "rspSize";
+	public static final String DATA_UIN = "uin";
+	public static final String DATA_DEVICEINFO = "deviceInfo";
+	public static final String DATA_APPID = "appid";
+	public static final String DATA_DETAIL = "detail";
+
+	private static final String TAG = SLog.TAG + ".ReportManager";
+	protected static ReportManager sInstance;
+
+	protected Random mRand;
+
+    protected List<Serializable> mCgiList;
+    protected List<Serializable> mViaList;
+
+    protected HandlerThread mHandlerThread = null;
+	protected Handler mSubHandler;
+    protected Executor mViaSerialExecutor;
+    protected Executor mCgiSerialExecutor;
+
+    /**
+     * 取得ReportManager实例
+     * 
+     * @return
+     */
+	public static synchronized ReportManager getInstance() {
+		if (sInstance == null) {
+			sInstance = new ReportManager();
+		}
+
+		return sInstance;
+	}
+
+	private ReportManager() {
+		mRand = new Random();
+        mViaList = Collections.synchronizedList(new ArrayList<Serializable>());
+        mCgiList = Collections.synchronizedList(new ArrayList<Serializable>());
+
+        mViaSerialExecutor = ThreadManager.newSerialExecutor();
+        mCgiSerialExecutor = ThreadManager.newSerialExecutor();
+
+        if (mHandlerThread == null) {
+            mHandlerThread = new HandlerThread("opensdk.report.handlerthread",
+                    Process.THREAD_PRIORITY_BACKGROUND);
+            mHandlerThread.start();
+        }
+        if (mHandlerThread.isAlive() && mHandlerThread.getLooper() != null) {
+            mSubHandler = new Handler(mHandlerThread.getLooper()) {
+                @Override
+                public void handleMessage(Message msg) {
+                    switch (msg.what) {
+                        case MSG_REPORT_CGI:
+                            doReportCgi();
+                            break;
+                        case MSG_REPORT_VIA:
+                            doReportVia();
+                            break;
+                        default:
+                            break;
+                    }
+                    super.handleMessage(msg);
+                }
+            };
+        }
+	}
+
+    /**
+     * Via上报方法
+     * 
+     * @param bundle
+     *            上报数据
+     * @param appid
+     *            应用程序ID
+     * @param timely
+     *            是否时候实时
+     */
+    public void reportVia(final Bundle bundle, String appid, final boolean timely) {
+		if (bundle == null) {
+            return;
+        }
+        SLog.v(TAG, "-->reportVia, bundle: " + bundle.toString());
+        if (!availableFrequency(REPORT_VIA, appid) && !timely) { // 如果不是实时上报，并且不满足采样
+			return;
+		}
+
+        mViaSerialExecutor.execute(new Runnable() {
+
+			@Override
+			public void run() {
+				try {
+					Bundle params = new Bundle();
+                    params.putString("uin", Constants.DEFAULT_UIN);
+                    params.putString("imei", MobileInfoUtil.getImei(Global.getContext()));
+                    params.putString("imsi", MobileInfoUtil.getImsi(Global.getContext()));
+                    params.putString("android_id", MobileInfoUtil.getAndroidId(Global.getContext()));
+			        params.putString("mac", MobileInfoUtil.getLocalMacAddress());
+			        //依据产品定义表格，1为android sdk
+			        params.putString("platform", "1");
+			        params.putString("os_ver", android.os.Build.VERSION.RELEASE);
+                    params.putString("position", Util.getLocation(Global.getContext()));
+                    params.putString("network", APNUtil.getApnName(Global.getContext()));
+			        params.putString("language", MobileInfoUtil.getLanguage());
+                    params.putString("resolution", MobileInfoUtil.getResolution(Global.getContext()));
+                    params.putString("apn", APNUtil.getApn(Global.getContext()));
+			        params.putString("model_name", android.os.Build.MODEL);
+			        params.putString("timezone", TimeZone.getDefault().getID());
+                    params.putString("sdk_ver", Constants.SDK_VERSION);
+                    params.putString("qz_ver", Util.getAppVersionName(Global.getContext(), Constants.PACKAGE_QZONE));
+                    params.putString("qq_ver", Util.getVersionName(Global.getContext(), Constants.PACKAGE_QQ));
+                    params.putString("qua", Util.getQUA3(Global.getContext(), Global.getPackageName()));
+                    params.putString("packagename", Global.getPackageName());
+                    params.putString("app_ver", Util.getAppVersionName(Global.getContext(), Global.getPackageName()));
+
+                    // 添加业务上报字段
+			        if (bundle != null) {
+			            params.putAll(bundle);
+			        }
+
+			        BaseData viaData = new BaseData(params);
+			        //将当前的上报item添加到内存list
+					// synchronizedList线程安全
+                    mViaList.add(viaData);
+
+                    // 只考虑内存中的数据条数，不考虑数据库存在的条数，避免频繁开关数据库。
+                    int dataSize = mViaList.size();
+
+                    // 获取后台间隔时间
+                    int interval = OpenConfig.getInstance(Global.getContext(),
+                            null).getInt("Agent_ReportTimeInterval");
+			        interval = interval == 0 ? DEFAULT_INTERVAL: interval;
+			        //上报主要包含2中中场景：
+			        //1、超过指定条数触发上报
+			        //2、超过一定时间触发上报
+			        int msgid = MSG_REPORT_VIA;
+                    if (availableCount(REPORT_VIA, dataSize) || timely) { // 实时上报，或满足上报条数
+			        	doReportVia();
+                        mSubHandler.removeMessages(msgid);
+                    } else { // 超过interval时间间隔上报
+                        if (!mSubHandler.hasMessages(msgid)) {
+			        		Message msg = Message.obtain();
+			        		msg.what = msgid;
+                            mSubHandler.sendMessageDelayed(msg, interval);
+						}
+			        }
+				} catch (Exception e) {
+                    SLog.e(TAG, "--> reporVia, exception in sub thread.", e);
+				}
+			}
+		});
+
+	}
+
+    /**
+     * CGI 上报
+     *
+     * @param command
+     *            上报command
+     * @param startTime
+     *            cgi开始时间
+     * @param reqSize
+     *            请求包体大小
+     * @param rspSize
+     *            回包大小
+     * @param resultCode
+     *            返回码
+     */
+    public void reportCgi(final String command, final long startTime, final long reqSize, final long rspSize,
+            final int resultCode) {
+        reportCgi(command, startTime, reqSize, rspSize, resultCode, "", false);
+    }
+
+    /**
+     * CGI上报
+     *
+     * @param command
+     *            上报command
+     * @param startTime
+     *            cgi开始时间
+     * @param reqSize
+     *            请求包体大小
+     * @param rspSize
+     *            回包大小
+     * @param resultCode
+     *            返回码
+     * @param detail
+     *            详细信息
+     * @param timely
+     *            是否实时
+     */
+	public void reportCgi(final String command, final long startTime, final long reqSize, final long rspSize,
+            final int resultCode, final String detail, final boolean timely) {
+        SLog.v(TAG, "-->reportCgi, command: " + command + " | startTime: " + startTime + " | reqSize:" + reqSize
+                + " | rspSize: " + rspSize + " | responseCode: " + resultCode + " | detail: " + detail);
+		String ext = "" + resultCode;
+        if (!availableFrequency(REPORT_CGI, ext) && !timely) { // 如果不是实时上报，并且不满足采样
+			return;
+		}
+
+        mCgiSerialExecutor.execute(new Runnable() {
+			@Override
+			public void run() {
+				try {
+					long timeCost = SystemClock.elapsedRealtime() - startTime;
+
+					Bundle currItem = new Bundle();
+
+                    String apn = APNUtil.getApnName(Global.getContext());
+					currItem.putString(DATA_APN, apn);
+                    currItem.putString(DATA_APPID, ReportComm.APP_ID_VALUE_FOR_CGI);
+					currItem.putString(DATA_COMMAND, command);
+					currItem.putString(DATA_DETAIL, detail);
+
+					StringBuilder builder = new StringBuilder();
+			        builder.append("network=").append(apn).append('&');
+			        builder.append("sdcard=").append(Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED) ? 1 : 0).append('&');
+                    builder.append("wifi=").append(APNUtil.getNetWorkName(Global.getContext()));
+			        String deviceinfo = builder.toString();
+			        currItem.putString(DATA_DEVICEINFO, deviceinfo);
+
+                    // 采样字段， 100％上报，值为1； 1％上报，值为100
+                    int frequency = getFrequency(resultCode);
+                    frequency = 100 / frequency;
+                    if (frequency <= 0) {
+                        frequency = 1;
+                    } else if (frequency > 100) {
+                        frequency = 100;
+                    }
+
+                    currItem.putString(DATA_FREQUENCY, frequency + "");
+			        currItem.putString(DATA_REQSIZE, reqSize + "");
+			        currItem.putString(DATA_RESULTCODE, resultCode + "");
+			        currItem.putString(DATA_RSPSIZE, rspSize + "");
+			        currItem.putString(DATA_TIMECOST, timeCost + "");
+                    currItem.putString(DATA_UIN, Constants.DEFAULT_UIN);
+
+			        BaseData data = new BaseData(currItem);
+			        //将当前的上报item添加到内存list
+                    // synchronizedList线程安全
+                    mCgiList.add(data);
+
+                    // 只考虑内存中的数据条数，不考虑数据库存在的条数，避免频繁开关数据库。
+                    int dataSize = mCgiList.size();
+                    int interval = OpenConfig.getInstance(Global.getContext(),
+	                            null).getInt("Agent_ReportTimeInterval");
+	                interval = interval == 0 ? DEFAULT_INTERVAL: interval;
+			        //上报主要包含2中中场景：
+			        //1、超过指定条数触发上报
+			        //2、超过一定时间触发上报
+                    if (availableCount(REPORT_CGI, dataSize) || timely) { // 实时上报，或满足上报条数
+			        	doReportCgi();
+                        mSubHandler.removeMessages(MSG_REPORT_CGI);
+                    } else { // 超过interval时间间隔上报
+                        if (!mSubHandler.hasMessages(MSG_REPORT_CGI)) {
+			        		Message msg = Message.obtain();
+			        		msg.what = MSG_REPORT_CGI;
+                            mSubHandler.sendMessageDelayed(msg, interval);
+						}
+			        }
+				} catch(Exception e) {
+                    SLog.e(TAG, "--> reportCGI, exception in sub thread.", e);
+				}
+			}
+		});
+
+	}
+
+    /**
+     * 执行Cgi上报操作
+     */
+	protected void doReportCgi() {
+        mCgiSerialExecutor.execute(new Runnable() {
+            @Override
+            public void run() {
+				try {
+					Bundle params = null;
+                    params = prepareCgiData();
+					if (params == null) {
+                        return;
+                    }
+
+					int tryCount = 0;
+                    int maxRetryCount = OpenConfig.getInstance(Global.getContext(),
+							null).getInt("Common_HttpRetryCount");
+					maxRetryCount = maxRetryCount == 0 ? ReportComm.REPORT_RETRY_COUNT : maxRetryCount;
+                    SLog.d(TAG, "-->doReportCgi, retryCount: " + maxRetryCount);
+
+					boolean uploadSucc = false;
+					do {
+						tryCount++;
+						try {
+                            HttpClient client = HttpUtils.getHttpClient(Global.getContext(), null, URL_REPORT_CGI);
+							HttpUriRequest request = null;
+							HttpPost post = new HttpPost(URL_REPORT_CGI);
+							post.addHeader("Accept-Encoding", "gzip");
+							post.setHeader("Content-Type", "application/x-www-form-urlencoded");
+
+                            String encodedParam = HttpUtils.encodeUrl(params);
+
+                            byte[] data = Util.getBytesUTF8(encodedParam);
+							ByteArrayEntity formEntity = new ByteArrayEntity(data);
+							post.setEntity(formEntity);
+							request = post;
+
+							HttpResponse response = client.execute(request);
+							StatusLine status = response.getStatusLine();
+							int statusCode = status.getStatusCode();
+
+                            SLog.d(TAG, "-->doReportCgi, statusCode: " + statusCode);
+							if (statusCode == 200) {
+								ReportDatabaseHelper.getInstance()
+										.clearReportItem(REPORT_CGI);
+								uploadSucc = true;
+							}
+							break;
+						} catch (ConnectTimeoutException e) {
+                            SLog.e(TAG, "-->doReportCgi, doupload exception", e);
+						} catch (SocketTimeoutException e) {
+                            SLog.e(TAG, "-->doReportCgi, doupload exception", e);
+						} catch (Exception e) {
+                            SLog.e(TAG, "-->doReportCgi, doupload exception", e);
+							break;
+						}
+					} while (tryCount < maxRetryCount);
+
+					if (!uploadSucc) {
+						ReportDatabaseHelper.getInstance().saveReportItemToDB(
+								REPORT_CGI, mCgiList);
+					}
+                    // 清空内存中的数据
+					// synchronizedList线程安全
+                    mCgiList.clear();
+				} catch(Exception e) {
+                    SLog.e(TAG, "-->doReportCgi, doupload exception out.", e);
+            	}
+            }
+        });
+	}
+
+	/**
+	 * 上报采样率计算
+	 * @param report 上报的类型，cgi和via
+	 * @param ext 上报类型为cgi时，为cgi的response；上报类型为via时，为appid
+	 * @return
+	 */
+	protected boolean availableFrequency(String report, String ext) {
+        SLog.d(TAG, "-->availableFrequency, report: " + report + " | ext: " + ext);
+		if (TextUtils.isEmpty(report)) {
+			return false;
+		}
+		boolean result = false;
+		int frequency = 100;
+		if (report.equals(REPORT_CGI)) {
+	        // 根据返回码区分成功还是失败，按不同频率上报
+			int ret = 0;
+			try {
+				ret = Integer.parseInt(ext);
+			} catch (Exception e) {
+				return result;
+			}
+			frequency = getFrequency(ret);
+	        if (mRand.nextInt(100) < frequency) {
+	        	result = true;
+	        } else {
+	        	result = false;
+	        }
+		} else if (report.equals(REPORT_VIA)) {
+            frequency = ReportConfig.getReportFrequency(ext);
+            if (mRand.nextInt(100) < frequency) {
+	        	result = true;
+	        } else {
+	        	result = false;
+	        }
+		}
+
+        SLog.d(TAG, "-->availableFrequency, result: " + result + " | frequency: " + frequency);
+
+		return result;
+	}
+
+	/**
+	 * 根据当前的上报类型，及上报条数判断是否满足上报条件
+	 * @param report 上报类型，cgi或者via
+	 * @param dataSize 当前的上报条数
+	 * @return
+	 */
+	protected boolean availableCount(String report, int dataSize) {
+		int maxcount = 0;
+		if (report.equals(REPORT_CGI)) {
+            maxcount = OpenConfig.getInstance(Global.getContext(),
+	                null).getInt("Common_CGIReportMaxcount");
+	        maxcount = maxcount == 0 ? ReportComm.REPORT_MAX : maxcount;
+		} else if (report.equals(REPORT_VIA)) {
+            maxcount = OpenConfig.getInstance(Global.getContext(),
+	                null).getInt("Agent_ReportBatchCount");
+	        maxcount = maxcount == 0 ? DEFAULT_MAX_COUNT : maxcount;
+		}
+        SLog.d(TAG, "-->availableCount, report: " + report + " | dataSize: " + dataSize + " | maxcount: " + maxcount);
+
+        if (dataSize >= maxcount) {
+            return true;
+        } else {
+            return false;
+        }
+	}
+
+	/**
+     * 根据返回码，获取上报频率，频率配置由后台下发
+     *
+     * @param ret cgi请求的返回码
+     * @return 上报频率，数字为0~100，100表示100%上报
+     */
+    protected int getFrequency(int ret) {
+        int frequency = 100;
+        // 根据返回码区分成功还是失败，按不同频率上报
+        if (ret == 0) {
+            // 返回码为0认为是成功的，按成功情况的概率上报
+            frequency = OpenConfig.getInstance(Global.getContext(),
+                    null).getInt("Common_CGIReportFrequencySuccess");
+            frequency = frequency == 0 ? ReportComm.REPORT_FREQUENCY_SUCCESS : frequency;
+        } else {
+            // 返回码不为0，按失败概率上报
+            frequency = OpenConfig.getInstance(Global.getContext(),
+                    null).getInt("Common_CGIReportFrequencyFailed");
+            frequency = frequency == 0 ? ReportComm.REPORT_FREQUENCY_FAILED : frequency;
+        }
+        return frequency;
+    }
+
+    /**
+     * 准备cgi上报的数据，内存+数据库保存的
+     * 
+     * @return 当前要上报的数据条数
+     */
+    protected Bundle prepareCgiData() {
+    	BaseData item = null;
+        if (mCgiList.size() == 0) {
+            return null;
+        }
+        item = (BaseData) mCgiList.get(0);
+
+        if (item == null) {
+            SLog.d(TAG, "-->prepareCgiData, the 0th cgireportitem is null.");
+            return null;
+        }
+
+    	String appid = item.attrs.get(DATA_APPID);
+
+    	List<Serializable> itemList = ReportDatabaseHelper.getInstance().getReportItemFromDB(REPORT_CGI);
+    	if (itemList != null) {
+    		mCgiList.addAll(itemList);
+    	}
+        SLog.d(TAG, "-->prepareCgiData, mCgiList size: " + mCgiList.size());
+        if (mCgiList.size() == 0) return null;
+
+        // 批量数据格式进行打包操作
+    	Bundle params = new Bundle();
+        try {
+        	params.putString(ReportComm.APP_ID, appid);
+            params.putString(ReportComm.SDK_VERSION, Constants.SDK_VERSION_REPORT);
+        	params.putString(ReportComm.DEVICE, android.os.Build.DEVICE);
+        	params.putString(ReportComm.QUA, ReportComm.QUA_VALUE);
+        	params.putString("key", ReportComm.APN + "," + ReportComm.FREQUENCY + ","
+                    + ReportComm.COMMAND_ID + "," + ReportComm.RESULT_CODE + ","
+                    + ReportComm.TIME_COST
+                    + "," + ReportComm.REQUEST_SIZE + "," + ReportComm.RESPONSE_SIZE + ","
+                    + ReportComm.DETAIL + "," + ReportComm.TO_UIN + "," +ReportComm.DEVICE_INFO);
+            for (int i = 0; i < mCgiList.size(); i++) {
+            	BaseData bundle = (BaseData) mCgiList.get(i);
+            	params.putString(i + "_1", bundle.attrs.get(DATA_APN));
+            	params.putString(i + "_2", bundle.attrs.get(DATA_FREQUENCY));
+            	params.putString(i + "_3", bundle.attrs.get(DATA_COMMAND));
+            	params.putString(i + "_4", bundle.attrs.get(DATA_RESULTCODE));
+            	params.putString(i + "_5", bundle.attrs.get(DATA_TIMECOST));
+            	params.putString(i + "_6", bundle.attrs.get(DATA_REQSIZE));
+            	params.putString(i + "_7", bundle.attrs.get(DATA_RSPSIZE));
+            	params.putString(i + "_8", bundle.attrs.get(DATA_DETAIL));
+            	params.putString(i + "_9", bundle.attrs.get(DATA_UIN));
+                String deviceinfo = MobileInfoUtil.getDeviceinfoForCgiReport(Global.getContext()) + "&"
+                        + bundle.attrs.get(DATA_DEVICEINFO);
+                params.putString(i + "_10", deviceinfo);
+            }
+        } catch (Exception e) {
+            SLog.e(TAG, "-->prepareCgiData, exception.", e);
+            return null;
+        }
+
+        SLog.v(TAG, "-->prepareCgiData, end. params: " + params.toString());
+        return params;
+    }
+
+    /**
+     * 将内存及数据库里的序列化数据整合到Bundle里
+     * 
+     * @return
+     */
+    protected Bundle prepareViaData() {
+    	List<Serializable> itemList = ReportDatabaseHelper.getInstance().getReportItemFromDB(REPORT_VIA);
+    	if (itemList != null) {
+    		mViaList.addAll(itemList);
+    	}
+        SLog.d(TAG, "-->prepareViaData, mViaList size: " + mViaList.size());
+		if (mViaList.size() == 0) {
+            return null;
+        }
+    	JSONArray array = new JSONArray();
+    	for (Serializable bundle : mViaList) {
+    		JSONObject obj = new JSONObject();
+
+    		BaseData data = (BaseData) bundle;
+    		for (String str : data.attrs.keySet()) {
+				try {
+                    String value = data.attrs.get(str);
+                    if (null == value) {
+                        value = "";
+                    }
+                    obj.put(str, value);
+				} catch (JSONException e) {
+                    SLog.e(TAG, "-->prepareViaData, put bundle to json array exception", e);
+					continue;
+				}
+			}
+    		array.put(obj);
+		}
+        SLog.v(TAG, "-->prepareViaData, JSONArray array: " + array.toString());
+
+    	Bundle params = new Bundle();
+    	JSONObject obj = new JSONObject();
+    	try {
+    		obj.put("data", array);
+		} catch (JSONException e) {
+            SLog.e(TAG, "-->prepareViaData, put bundle to json array exception", e);
+            return null;
+		}
+    	params.putString("data", obj.toString());
+
+    	return params;
+    }
+
+    /**
+     * 执行Via上报操作
+     */
+    protected void doReportVia() {
+        mViaSerialExecutor.execute(new Runnable() {
+
+			@Override
+			public void run() {
+				try {
+					Bundle params = prepareViaData();
+					if (params == null) {
+                        return;
+                    }
+                    SLog.v(TAG, "-->doReportVia, params: " + params.toString());
+
+                    // 获取后台retry次数
+					int reportHttpRetryCount = ReportConfig.getReportHttpRetryCount();
+					int try_count = 0;
+					boolean uploadSuccess = false;
+
+					long startTime = SystemClock.elapsedRealtime();
+					long reqsize = 0;
+					long rspsize = 0;
+					int resultcode = 0;
+
+					do {
+						try_count++;
+						try {
+                            Statistic stat = HttpUtils.openUrl2(Global.getContext(), URL_REPORT_VIA,
+                                    HttpPost.METHOD_NAME, params);
+                            JSONObject jsonResult = Util.parseJson(stat.response);
+
+							int rspCode = 0;
+							try {
+								rspCode = jsonResult.getInt("ret");
+							} catch (JSONException e) {
+								rspCode = Constants.ERROR_JSON;
+							}
+
+							if (rspCode == 0
+									|| !TextUtils.isEmpty(stat.response)) {
+								uploadSuccess = true;
+								try_count = reportHttpRetryCount;
+							}
+
+							reqsize = stat.reqSize;
+							rspsize = stat.rspSize;
+
+						} catch (ConnectTimeoutException e) {
+							startTime = SystemClock.elapsedRealtime(); // 重置开始时间
+							reqsize = 0;
+							rspsize = 0;
+							resultcode = Constants.ERROR_CONNECTTIMEOUT;
+						} catch (SocketTimeoutException e) {
+							startTime = SystemClock.elapsedRealtime(); // 重置开始时间
+							reqsize = 0;
+							rspsize = 0;
+							resultcode = Constants.ERROR_SOCKETTIMEOUT;
+						} catch (JSONException e) {// json解析异常
+							reqsize = 0;
+							rspsize = 0;
+							resultcode = Constants.ERROR_JSON;
+						} catch (NetworkUnavailableException e) {
+                            mViaList.clear();
+                            SLog.d(TAG, "doReportVia, NetworkUnavailableException.");
+                            return;
+						} catch (HttpStatusException e) {
+							try {
+								String httpStatus = e.getMessage().replace(HttpStatusException.ERROR_INFO, "");
+								resultcode = Integer.parseInt(httpStatus);
+							} catch (Exception ex) {
+							}
+                            // updated by hamlingong: 直接退出retry
+                            break;
+						} catch (IOException e) {
+							reqsize = 0;
+							rspsize = 0;
+                            resultcode = HttpUtils.getErrorCodeFromException(e);
+						} catch (Exception e) {
+							reqsize = 0;
+							rspsize = 0;
+							resultcode = Constants.ERROR_UNKNOWN;
+							try_count = reportHttpRetryCount;
+						}
+					} while (try_count < reportHttpRetryCount);
+
+                    reportCgi(COMMAND_REPORT_VIA, startTime, reqsize, rspsize, resultcode, null, false);
+					if (uploadSuccess) {
+						ReportDatabaseHelper.getInstance().clearReportItem(REPORT_VIA);
+					} else {
+						ReportDatabaseHelper.getInstance().saveReportItemToDB(REPORT_VIA, mViaList);
+					}
+                    // 清空内存中的数据
+					// synchronizedList线程安全
+                    mViaList.clear();
+                    SLog.d(TAG, "-->doReportVia, uploadSuccess: " + uploadSuccess);
+				} catch(Exception e) {
+                    SLog.e(TAG, "-->doReportVia, exception in serial executor.", e);
+				}
+			}
+
+		});
+    }
+
+    /**
+     * HttpRequest 请求
+     * 
+     * @param url
+     *            请求URL
+     * @param method
+     *            GET or POST
+     * @param params
+     *            发送数据，会对params中key以及value做URL encode
+     * @param encodeAllParams
+     *            对整个params数据再做一次encode，c.isdspeed.qq.com/code.cgi的特殊要求。
+     */
+    public void httpRequest(final String url, final String method, final Bundle params, final boolean encodeAllParams) {
+        ThreadManager.executeOnSubThread(new Runnable() {
+            @SuppressWarnings("deprecation")
+            @Override
+            public void run() {
+                try {
+                    if (null == params) {
+                        SLog.e(TAG, "-->httpRequest, params is null!");
+                        return;
+                    }
+
+                    int tryCount = 0;
+                    int maxRetryCount = ReportConfig.getReportHttpRetryCount();
+                    maxRetryCount = maxRetryCount == 0 ? ReportComm.REPORT_RETRY_COUNT : maxRetryCount;
+
+                    SLog.d(TAG, "-->httpRequest, retryCount: " + maxRetryCount);
+                    boolean uploadSuccess = false;
+
+                    HttpClient client = HttpUtils.getHttpClient(Global.getContext(), null, url);
+                    HttpUriRequest request = null;
+                    String encodedParam = HttpUtils.encodeUrl(params);
+                    if (encodeAllParams) {
+                        encodedParam = URLEncoder.encode(encodedParam);
+                    }
+
+                    if (method.toUpperCase().equals("GET")) {
+                        StringBuffer requestUrl = new StringBuffer(url);
+                        requestUrl.append(encodedParam);
+                        request = new HttpGet(requestUrl.toString());
+                    } else if (method.toUpperCase().equals("POST")) {
+                        HttpPost post = new HttpPost(url);
+                        byte[] data = Util.getBytesUTF8(encodedParam);
+                        ByteArrayEntity formEntity = new ByteArrayEntity(data);
+                        post.setEntity(formEntity);
+                        request = post;
+                    } else {
+                        SLog.e(TAG, "-->httpRequest unkonw request method return.");
+                        return;
+                    }
+
+                    request.addHeader("Accept-Encoding", "gzip");
+                    request.addHeader("Content-Type", "application/x-www-form-urlencoded");
+
+                    do {
+                        tryCount++;
+                        try {
+                            HttpResponse response = client.execute(request);
+                            StatusLine status = response.getStatusLine();
+                            int statusCode = status.getStatusCode();
+
+                            SLog.d(TAG, "-->httpRequest, statusCode: " + statusCode);
+                            if (statusCode != 200) {
+                                SLog.d(TAG, "-->ReportCenter httpRequest : HttpStatuscode != 200");
+                            } else {
+                                uploadSuccess = true;
+                                SLog.d(TAG, "-->ReportCenter httpRequest Thread success");
+                            }
+                            break;  // 只有连接超时和socket超时这两种情况才做retry
+                        } catch (ConnectTimeoutException e) {
+                            SLog.d(TAG, "-->ReportCenter httpRequest ConnectTimeoutException");
+                        } catch (SocketTimeoutException e) {
+                            SLog.d(TAG, "-->ReportCenter httpRequest SocketTimeoutException");
+                        } catch (Exception e) {
+                            SLog.d(TAG, "-->ReportCenter httpRequest Exception");
+                            break;
+                        }
+                    } while (tryCount < maxRetryCount);
+
+                    if (uploadSuccess == true) {
+                        SLog.d(TAG, "-->ReportCenter httpRequest Thread request success");
+                    } else {
+                        SLog.d(TAG, "-->ReportCenter httpRequest Thread request failed");
+                    }
+                } catch (Exception e) {
+                    SLog.d(TAG, "-->httpRequest, exception in serial executor.");
+                }
+            }
+        });
+    }
+
+ }

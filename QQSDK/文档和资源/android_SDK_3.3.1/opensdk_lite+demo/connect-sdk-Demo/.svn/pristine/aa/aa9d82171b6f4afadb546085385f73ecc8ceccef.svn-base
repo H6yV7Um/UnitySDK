@@ -1,0 +1,94 @@
+
+package com.tencent.connect.auth;
+
+import java.util.HashMap;
+
+import com.tencent.tauth.IUiListener;
+
+public class AuthMap {
+    @SuppressWarnings("unused")
+    private static final String TAG = "BrowserAuth";
+    private static int sSerial = 0;
+    public static AuthMap sInstance;
+    
+    public static class Auth {
+        public IUiListener listener;
+        public AuthDialog dialog;
+        public String key;
+    }
+
+
+    public static AuthMap getInstance() {
+        if (null == sInstance) {
+            sInstance = new AuthMap();
+        }
+        return sInstance;
+    }
+
+    public HashMap<String, Auth> authMap = new HashMap<String, Auth>();
+
+    public Auth get(String id) {
+        return authMap.get(id);
+    }
+    
+    public static int getSerial(){
+        return ++sSerial;
+    }
+    
+    public String set(Auth auth){
+        int serial = getSerial();
+    	
+        try {
+        	authMap.put(""+serial, auth);
+	    } catch (Throwable th) {
+	        th.printStackTrace();
+	    }        
+        return ""+serial;
+    }
+
+    public void remove(String id) {
+        authMap.remove(id);
+    }
+
+    public final String KEY_CHAR_LIST = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+
+    public String makeKey() {
+        int keyLength = (int) Math.ceil(Math.random() * 20 + 3);
+        char[] chars = KEY_CHAR_LIST.toCharArray();
+        int keyCharLength = chars.length;
+        StringBuffer buffer = new StringBuffer();
+        for (int i = 0; i < keyLength; i++) {
+            int c = (int) (Math.random() * keyCharLength);
+            buffer.append(chars[c]);
+        }
+        String key = buffer.toString();
+        // key = "VSgLBWKUVbswQ";//TODO test
+        return key;
+    }
+
+    public String decode(String hexCode, String key) {
+        return f(hexCode, key);
+    }
+
+    private String f(String hexCode, String key) {
+        assert hexCode.length() % 2 == 0;
+        StringBuilder sb = new StringBuilder();
+        int keyI = 0;
+        int keyLength = key.length();
+        // System.out.println(hexCode+" * "+key);
+        for (int i = 0, l = hexCode.length() / 2; i < l; ++i) {
+            String sourceHexStr = hexCode.substring(i * 2, i * 2 + 2);
+            int encodedSourceInt = Integer.parseInt(sourceHexStr, 16);
+            // char keyIChar = key.charAt(keyI);
+            int keyIInt = (int) key.charAt(keyI);
+            int c = (encodedSourceInt ^ keyIInt);
+            // System.out.println(sourceHexStr+" "+encodedSourceInt+" "+keyIChar+" "+keyIInt+" to "+(char)c);
+            sb.append((char) c);
+
+            keyI++;
+            keyI %= keyLength;
+        }
+        // System.out.println("output: "+sb.toString());
+        return sb.toString();
+    }
+}

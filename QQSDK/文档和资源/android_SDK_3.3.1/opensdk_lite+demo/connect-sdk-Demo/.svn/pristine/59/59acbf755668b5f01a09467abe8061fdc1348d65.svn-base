@@ -1,0 +1,1132 @@
+package com.tencent.open;
+
+import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
+import java.util.ArrayList;
+
+import org.apache.http.client.methods.HttpGet;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.text.TextUtils;
+import android.util.Base64;
+import android.widget.Toast;
+
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.connect.share.QQShare;
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.MobileInfoUtil;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.ThreadManager;
+import com.tencent.open.utils.Util;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+
+/**
+ * 游戏相关类接口
+ * 1、游戏内加好友
+ * 2、游戏内绑群
+ * @author zanyli
+ *
+ */
+public class GameAppOperation extends BaseApi {
+    private static final String TAG = SLog.TAG + ".GameAppOperation";
+	private static final String ADDFRIEND_SCHEME_URL = "mqqapi://gamesdk/add_friend?src_type=app&version=1";
+    private static final String BIND_GROUP_SCHEME_URL = "mqqapi://gamesdk/bind_group?src_type=app&version=1";
+    private static final String ADD_TO_QQ_FAVORITES_RUL = "mqqapi://share/to_qqfav?src_type=app&version=1&file_type=news";
+    private static final String TRANSPORT_TO_QQ_DATALINE_RUL = "mqqapi://share/to_qqdataline?src_type=app&version=1&file_type=news";
+    private static final String SHARE_TO_TROOP_BAR_RUL = "mqqapi://share/to_troopbar?src_type=app&version=1&file_type=news";
+
+	//下面三个参数是需要app传入的
+	/**
+	 * 要添加好友的oepnid
+	 */
+	public static final String GAME_FRIEND_OPENID = "fopen_id";
+	/**
+	 * 要添加好友显示的昵称
+	 */
+	public static final String GAME_FRIEND_LABEL = "friend_label";
+	/**
+	 * 添加时的验证信息
+	 */
+	public static final String GAME_FRIEND_ADD_MESSAGE = "add_msg";
+
+    /**
+     * 游戏公会ID
+     */
+    public static final String GAME_UNION_ID = "unionid";
+
+    /**
+     * 游戏公会名称
+     */
+    public static final String GAME_UNION_NAME = "union_name";
+
+    /**
+     * 游戏区域ID
+     */
+    public static final String GAME_ZONE_ID = "zoneid";
+
+    /**
+     * 游戏公会群主签名，用于验证群主身份
+     */
+    public static final String GAME_SIGNATURE = "signature";
+
+    /*
+     * QQ收藏和数据线字段
+     */
+    public static final int QQFAV_DATALINE_TYPE_DEFAULT = 1; // 资讯类
+    public static final int QQFAV_DATALINE_TYPE_AUDIO = 2; // 音乐类
+    public static final int QQFAV_DATALINE_TYPE_IMAGE_TEXT = 5; // 图文
+    public static final int QQFAV_DATALINE_TYPE_TEXT = 6; // 纯文字
+
+    public static final char PIC_SYMBOLE = 0x14;
+
+    public static final String QQFAV_DATALINE_SHAREID = "share_id";
+    public static final String QQFAV_DATALINE_APPNAME = "app_name";
+    public static final String QQFAV_DATALINE_SRCTYPE = "src_type";
+    public static final String QQFAV_DATALINE_TITLE = "title";
+    public static final String QQFAV_DATALINE_DESCRIPTION = "description";
+    public static final String QQFAV_DATALINE_REQTYPE = "req_type";
+    public static final String QQFAV_DATALINE_IMAGEURL = "image_url";
+    public static final String QQFAV_DATALINE_URL = "url";
+    public static final String QQFAV_DATALINE_AUDIOURL = "audioUrl";
+    public static final String QQFAV_DATALINE_VERSION = "version";
+    public static final String QQFAV_DATALINE_OPENID = "open_id";
+    public static final String QQFAV_DATALINE_FILEDATA = "file_data";
+    
+    //有奖分享相关
+    public static final String SHARE_PRIZE_IMAGE_URL = "imageUrl";
+    public static final String SHARE_PRIZE_TITLE = "title";
+    public static final String SHARE_PRIZE_SUMMARY = "summary";
+    public static final String SHARE_PRIZE_TARGET_URL = "targetUrl";
+    public static final String SHARE_PRIZE_ACTIVITY_ID = "activityid";
+    public static final String SHARE_PRIZE_SHARE_ID = "shareid";
+    public static final String SHARE_PRIZE_SHARE_ID_LIST = "shareid_list";
+    public static final int SHARE_PRIZE_TITLE_MAX_LENGTH = 45;
+    public static final int SHARE_PRIZE_SUMMARY_MAX_LENGTH = 60;
+
+    // 部落ID
+    public static final String TROOPBAR_ID = "troopbar_id";
+
+	public GameAppOperation(QQToken token) {
+		super(token);
+	}
+
+	public void makeFriend(Activity activity, Bundle params) {
+        SLog.i(TAG, "-->makeFriend()  -- start");
+		if (params == null) {
+			SLog.e(TAG, "-->makeFriend params is null");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_MAKE_FRIEND,
+                    Constants.VIA_REPORT_TYPE_MAKE_FRIEND, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+
+		String fOpenid = params.getString(GAME_FRIEND_OPENID);
+		if (TextUtils.isEmpty(fOpenid)) {
+            SLog.e(TAG, "-->make friend, fOpenid is empty.");
+            OpenSdkStatic.getInstance()
+                    .reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_MAKE_FRIEND,
+                    Constants.VIA_REPORT_TYPE_MAKE_FRIEND, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+			return;
+		}
+
+		String label = params.getString(GAME_FRIEND_LABEL);
+		String message = params.getString(GAME_FRIEND_ADD_MESSAGE);
+		String appName = Util.getApplicationLable(activity);
+
+		String openid = mToken.getOpenId();
+		String appid = mToken.getAppId();
+
+        SLog.v(TAG, "-->make friend, fOpenid: " + fOpenid + " | label: " + label +
+				" | message: " + message + " | openid: " + openid + " | appid:" + appid);
+
+		StringBuffer url = new StringBuffer(ADDFRIEND_SCHEME_URL);
+        url.append("&fopen_id=" + Base64.encodeToString(Util.getBytesUTF8(fOpenid), Base64.NO_WRAP));
+		if (!TextUtils.isEmpty(openid)) {
+            url.append("&open_id=" + Base64.encodeToString(Util.getBytesUTF8(openid), Base64.NO_WRAP));
+		}
+		if (!TextUtils.isEmpty(appid)) {
+			url.append("&app_id=" + appid);
+		}
+		if (!TextUtils.isEmpty(label)) {
+            url.append("&friend_label=" + Base64.encodeToString(Util.getBytesUTF8(label), Base64.NO_WRAP));
+		}
+		if (!TextUtils.isEmpty(message)) {
+            url.append("&add_msg=" + Base64.encodeToString(Util.getBytesUTF8(message), Base64.NO_WRAP));
+		}
+		if (!TextUtils.isEmpty(appName)) {
+            url.append("&app_name=" + Base64.encodeToString(Util.getBytesUTF8(appName), Base64.NO_WRAP));
+        }
+
+
+        SLog.v(TAG, "-->make friend, url: " + url.toString());
+		Intent activityIntent = new Intent(Intent.ACTION_VIEW);
+		activityIntent.setData(Uri.parse(url.toString()));
+
+        //这里版本号先写5.0，等合流后改为5.1
+        if (hasActivityForIntent(activityIntent) && !Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_5_1_0)) {
+			SLog.i(TAG, "-->makeFriend target activity found, qqver greater than 5.1.0");
+        	try {
+				//activity.startActivityForResult(activityIntent, 0);
+				activity.startActivity(activityIntent);
+                OpenSdkStatic.getInstance()
+                        .reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_MAKE_FRIEND,
+                        Constants.VIA_REPORT_TYPE_MAKE_FRIEND, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                                Constants.VIA_RESULT_SUCCESS);
+			} catch (Exception e) {
+                SLog.e(TAG, "-->make friend, start activity exception.", e);
+				showQQVersionTipsPage(activity);
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_MAKE_FRIEND,
+                        Constants.VIA_REPORT_TYPE_MAKE_FRIEND, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                        Constants.VIA_RESULT_FAIL);
+			}
+		} else {
+            SLog.w(TAG, "-->make friend, there is no activity.");
+			showQQVersionTipsPage(activity);
+            OpenSdkStatic.getInstance()
+                    .reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_MAKE_FRIEND,
+                    Constants.VIA_REPORT_TYPE_MAKE_FRIEND, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+		}
+        SLog.i(TAG, "-->makeFriend()  -- end");
+	}
+
+    /**
+     * 游戏内绑群<br>
+     * <br>
+     *
+     * @param activity
+     *            调用者Activity
+     * @param paramas
+     *            调用参数，必须包含：unionid, union_name, zoneid, signature
+     */
+    public void bindQQGroup(Activity activity, Bundle paramas) {
+        SLog.i(TAG, "-->bindQQGroup()  -- start");
+        if (null == activity) {
+            SLog.e(TAG, "-->bindQQGroup, activity is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+        if (paramas == null) {
+            Toast.makeText(activity, "Bundle参数为空", Toast.LENGTH_SHORT).show();
+            SLog.e(TAG, "-->bindQQGroup, params is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+
+        String appName = Util.getApplicationLable(activity);
+        StringBuffer url = new StringBuffer(BIND_GROUP_SCHEME_URL);
+        if (!TextUtils.isEmpty(appName)) {
+            url.append("&app_name=" + Base64.encodeToString(Util.getBytesUTF8(appName), Base64.NO_WRAP));
+        }
+
+        String gameUnionId = paramas.getString(GAME_UNION_ID);
+        if (TextUtils.isEmpty(gameUnionId)) {
+            Toast.makeText(activity, "游戏公会ID为空", Toast.LENGTH_SHORT).show();
+            SLog.e(TAG, "-->bindQQGroup, game union id is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+        url.append("&unionid=" + Base64.encodeToString(Util.getBytesUTF8(gameUnionId), Base64.NO_WRAP));
+
+        String gameUnionName = paramas.getString(GAME_UNION_NAME);
+        if (TextUtils.isEmpty(gameUnionName)) {
+            Toast.makeText(activity, "游戏公会名称为空", Toast.LENGTH_SHORT).show();
+            SLog.e(TAG, "-->bindQQGroup, game union name is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+        url.append("&union_name=" + Base64.encodeToString(Util.getBytesUTF8(gameUnionName), Base64.NO_WRAP));
+
+        String gameZoneId = paramas.getString(GAME_ZONE_ID);
+        if (TextUtils.isEmpty(gameZoneId)) {
+            Toast.makeText(activity, "游戏区域ID为空", Toast.LENGTH_SHORT).show();
+            SLog.e(TAG, "-->bindQQGroup, game zone id  is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+        url.append("&zoneid=" + Base64.encodeToString(Util.getBytesUTF8(gameZoneId), Base64.NO_WRAP));
+
+        String gameSignature = paramas.getString(GAME_SIGNATURE);
+        if (TextUtils.isEmpty(gameSignature)) {
+            Toast.makeText(activity, "游戏签名为空", Toast.LENGTH_SHORT).show();
+            SLog.e(TAG, "-->bindQQGroup, game signature is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+        url.append("&signature=" + Base64.encodeToString(Util.getBytesUTF8(gameSignature), Base64.NO_WRAP));
+
+        String openid = mToken.getOpenId();
+        if (!TextUtils.isEmpty(openid)) {
+            url.append("&openid=" + Base64.encodeToString(Util.getBytesUTF8(openid), Base64.NO_WRAP));
+        } else {
+            Toast.makeText(activity, "Openid为空", Toast.LENGTH_SHORT).show();
+            SLog.e(TAG, "-->bindQQGroup, openid is empty.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+
+        Bundle itParams = composeActivityParams();
+        for (String key : itParams.keySet()) {
+            String value = itParams.getString(key);
+            itParams.putString(key, Base64.encodeToString(Util.getBytesUTF8(value), Base64.NO_WRAP));
+        }
+        url.append("&" + HttpUtils.encodeUrl(itParams));
+
+        SLog.v(TAG, "-->bindQQGroup, url: " + url.toString());
+        Intent activityIntent = new Intent(Intent.ACTION_VIEW);
+        activityIntent.setData(Uri.parse(url.toString()));
+
+        if (hasActivityForIntent(activityIntent) && !Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_5_1_0)) {
+            SLog.i(TAG, "-->bingQQGroup target activity found, qqver > 5.1.0");
+        	try {
+                //activity.startActivityForResult(activityIntent, 0);
+            	activity.startActivity(activityIntent);
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                        Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                        Constants.VIA_RESULT_SUCCESS);
+            } catch (Exception e) {
+                SLog.e(TAG, "-->bind group, start activity exception.", e);
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                        Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                        Constants.VIA_RESULT_FAIL);
+                showQQVersionTipsPage(activity);
+            }
+        } else {
+            SLog.w(TAG, "-->bind group, there is no activity, show download page.");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_BIND_GROUP,
+                    Constants.VIA_REPORT_TYPE_BIND_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+            showQQVersionTipsPage(activity);
+        }
+        SLog.i(TAG, "-->bindQQGroup()  -- end");
+    }
+
+    public void addToQQFavorites(Activity activity, Bundle params, IUiListener listener) {
+        SLog.i(TAG, "addToQQFavorites() -- start");
+        int shareType = params.getInt(QQFAV_DATALINE_REQTYPE, QQFAV_DATALINE_TYPE_DEFAULT);
+        if (!checkFavoritesDatalineParams(activity, params, listener)) {
+        	SLog.e(TAG, "-->addToQQFavorites check parames failed");
+            reportForVia(Constants.VIA_REPORT_TYPE_QQFAVORITES, shareType, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+
+        StringBuffer url = new StringBuffer(ADD_TO_QQ_FAVORITES_RUL);
+        String imageUrl = params.getString(QQFAV_DATALINE_IMAGEURL); // 网络地址
+        String title = params.getString(QQFAV_DATALINE_TITLE);
+        String summary = params.getString(QQFAV_DATALINE_DESCRIPTION);
+        String targetUrl = params.getString(QQFAV_DATALINE_URL);
+        String audioUrl = params.getString(QQFAV_DATALINE_AUDIOURL);
+        String appName = Util.getApplicationLable(activity);
+        if (appName == null) {
+            // appName理论上不可能为null, 所以这个逻辑几乎没有用处.
+            appName = params.getString(QQFAV_DATALINE_APPNAME);
+        }
+        ArrayList<String> fileDataList = params.getStringArrayList(QQFAV_DATALINE_FILEDATA); // 本地地址
+
+        String appId = mToken.getAppId();
+        String openId = mToken.getOpenId();
+
+        SLog.v(TAG, "addToQQFavorites openId:" + openId);
+
+        if (!TextUtils.isEmpty(imageUrl)) {
+            url.append("&image_url=" + Base64.encodeToString(Util.getBytesUTF8(imageUrl), Base64.NO_WRAP));
+        }
+        if (null != fileDataList) {
+            StringBuffer sb = new StringBuffer();
+            int size = fileDataList.size();
+            for (int i = 0; i < size; i++) {
+                try {
+                    sb.append(URLEncoder.encode(fileDataList.get(i).trim(), "UTF-8"));
+                } catch (UnsupportedEncodingException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                    SLog.e(TAG, "UnsupportedEncodingException", e);
+                    sb.append(URLEncoder.encode(fileDataList.get(i).trim()));
+                }
+                if (i != size - 1) {
+                    sb.append(";");
+                }
+            }
+            url.append("&file_data=" + Base64.encodeToString(Util.getBytesUTF8(sb.toString()), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(title)) {
+            url.append("&title=" + Base64.encodeToString(Util.getBytesUTF8(title), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(summary)) {
+            url.append("&description=" + Base64.encodeToString(Util.getBytesUTF8(summary), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appId)) {
+            url.append("&share_id=" + appId);
+        }
+        if (!TextUtils.isEmpty(targetUrl)) {
+            url.append("&url=" + Base64.encodeToString(Util.getBytesUTF8(targetUrl), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appName)) {
+            String appN = appName;
+            if (appName.length() > 20) {
+                appN = appName.substring(0, 20) + "...";
+            }
+            url.append("&app_name=" + Base64.encodeToString(Util.getBytesUTF8(appN), Base64.NO_WRAP));
+        }
+
+        if (!TextUtils.isEmpty(openId)) {
+            url.append("&open_id=" + Base64.encodeToString(Util.getBytesUTF8(openId), Base64.NO_WRAP));
+        }
+
+        // 音乐分享
+        if (!TextUtils.isEmpty(audioUrl)) {
+            url.append("&audioUrl=" + Base64.encodeToString(Util.getBytesUTF8(audioUrl), Base64.NO_WRAP));
+        }
+        // zivon: 加上分享类型, 用string类型传入
+        url.append("&" + QQShare.SHARE_TO_QQ_KEY_TYPE + "="
+                + Base64.encodeToString(Util.getBytesUTF8(String.valueOf(shareType)), Base64.NO_WRAP));
+        SLog.v(TAG,"addToQQFavorites url: " + url.toString());
+
+        TencentStat.trackCustomEvent(Global.getContext(), mToken, "requireApi", "addToQQFavorites");
+
+        Intent activityIntent = new Intent(Intent.ACTION_VIEW);
+        activityIntent.setData(Uri.parse(url.toString()));
+        //不知道为什么手Q没有登陆态时通过getCallingPackage获取不到packageName，这里传入一下
+        activityIntent.putExtra("pkg_name", activity.getPackageName());
+
+        Object object = UIListenerManager.getInstance().setListnerWithAction(SystemUtils.QQFAVORITES_CALLBACK_ACTION, listener);
+        if (null != object) {// 取消上一次的调用
+            //((IUiListener) object).onCancel();
+        }
+
+        // 接口需要手Q5.2版本支持
+        if (hasActivityForIntent(activityIntent) && !Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_5_2_0)) {
+            try {
+            	activity.startActivity(activityIntent);
+            	//startAssistActivity(activity, Constants.REQUEST_QQ_FAVORITES, activityIntent, false);
+                reportForVia(Constants.VIA_REPORT_TYPE_QQFAVORITES, shareType, Constants.VIA_RESULT_SUCCESS);
+            } catch (Exception e) {
+                SLog.e(TAG, "-->addToQQFavorites, start activity exception.", e);
+                reportForVia(Constants.VIA_REPORT_TYPE_QQFAVORITES, shareType, Constants.VIA_RESULT_FAIL);
+                showQQVersionTipsPage(activity);
+            }
+        } else {
+            SLog.w(TAG, "-->addToQQFavorites, there is no activity, show download page.");
+            reportForVia(Constants.VIA_REPORT_TYPE_QQFAVORITES, shareType, Constants.VIA_RESULT_FAIL);
+            showQQVersionTipsPage(activity);
+        }
+        SLog.i(TAG, "addToQQFavorites() --end");
+    }
+
+    @SuppressWarnings("deprecation")
+    public void sendToMyComputer(Activity activity, Bundle params, IUiListener listener) {
+        SLog.i(TAG, "sendToMyComputer() --start");
+        int shareType = params.getInt(QQFAV_DATALINE_REQTYPE, QQFAV_DATALINE_TYPE_DEFAULT);
+        if (!checkFavoritesDatalineParams(activity, params, listener)) {
+        	SLog.e(TAG, "-->sendToMyComputer check parames failed");
+            reportForVia(Constants.VIA_REPORT_TYPE_DATALINE, shareType, Constants.VIA_RESULT_FAIL);
+            return;
+        }
+
+        StringBuffer url = new StringBuffer(TRANSPORT_TO_QQ_DATALINE_RUL);
+        String imageUrl = params.getString(QQFAV_DATALINE_IMAGEURL); // 网络地址
+        String title = params.getString(QQFAV_DATALINE_TITLE);
+        String summary = params.getString(QQFAV_DATALINE_DESCRIPTION);
+        String targetUrl = params.getString(QQFAV_DATALINE_URL);
+        String audioUrl = params.getString(QQFAV_DATALINE_AUDIOURL);
+        String appName = Util.getApplicationLable(activity);
+        if (appName == null) {
+            // appName理论上不可能为null, 所以这个逻辑几乎没有用处.
+            appName = params.getString(QQFAV_DATALINE_APPNAME);
+        }
+        ArrayList<String> fileDataList = params.getStringArrayList(QQFAV_DATALINE_FILEDATA); // 本地地址
+
+        String appId = mToken.getAppId();
+        String openId = mToken.getOpenId();
+
+        SLog.v(TAG, "openId:" + openId);
+
+        if (!TextUtils.isEmpty(imageUrl)) {
+            url.append("&image_url=" + Base64.encodeToString(Util.getBytesUTF8(imageUrl), Base64.NO_WRAP));
+        }
+        if (null != fileDataList) {
+            StringBuffer sb = new StringBuffer();
+            int size = fileDataList.size();
+            for (int i = 0; i < size; i++) {
+                try {
+                    sb.append(URLEncoder.encode(fileDataList.get(i).trim(), "UTF-8"));
+                } catch (UnsupportedEncodingException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                    SLog.e(TAG, "UnsupportedEncodingException", e);
+                    sb.append(URLEncoder.encode(fileDataList.get(i).trim()));
+                }
+                if (i != size - 1) {
+                    sb.append(";");
+                }
+            }
+            url.append("&file_data=" + Base64.encodeToString(Util.getBytesUTF8(sb.toString()), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(title)) {
+            url.append("&title=" + Base64.encodeToString(Util.getBytesUTF8(title), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(summary)) {
+            url.append("&description=" + Base64.encodeToString(Util.getBytesUTF8(summary), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appId)) {
+            url.append("&share_id=" + appId);
+        }
+        if (!TextUtils.isEmpty(targetUrl)) {
+            url.append("&url=" + Base64.encodeToString(Util.getBytesUTF8(targetUrl), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appName)) {
+            String appN = appName;
+            if (appName.length() > 20) {
+                appN = appName.substring(0, 20) + "...";
+            }
+            url.append("&app_name=" + Base64.encodeToString(Util.getBytesUTF8(appN), Base64.NO_WRAP));
+        }
+
+        if (!TextUtils.isEmpty(openId)) {
+            url.append("&open_id=" + Base64.encodeToString(Util.getBytesUTF8(openId), Base64.NO_WRAP));
+        }
+
+        // 音乐分享
+        if (!TextUtils.isEmpty(audioUrl)) {
+            url.append("&audioUrl=" + Base64.encodeToString(Util.getBytesUTF8(audioUrl), Base64.NO_WRAP));
+        }
+        // zivon: 加上分享类型, 用string类型传入
+        url.append("&" + QQShare.SHARE_TO_QQ_KEY_TYPE + "="
+                + Base64.encodeToString(Util.getBytesUTF8(String.valueOf(shareType)), Base64.NO_WRAP));
+        SLog.v(TAG,"sendToMyComputer url: " + url.toString());
+
+        TencentStat.trackCustomEvent(Global.getContext(), mToken, "requireApi", "sendToMyComputer");
+
+        Intent activityIntent = new Intent(Intent.ACTION_VIEW);
+        activityIntent.setData(Uri.parse(url.toString()));
+        //不知道为什么手Q没有登陆态时通过getCallingPackage获取不到packageName，这里传入一下
+        activityIntent.putExtra("pkg_name", activity.getPackageName());
+
+        Object object = UIListenerManager.getInstance().setListnerWithAction(SystemUtils.QQDATALINE_CALLBACK_ACTION, listener);
+        if (null != object) {// 取消上一次的调用
+            //((IUiListener) object).onCancel();
+        }
+
+        // 接口需要手Q5.2版本支持
+        if (hasActivityForIntent(activityIntent) && !Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_5_2_0)) {
+            try {
+                startAssistActivity(activity, Constants.REQUEST_SEND_TO_MY_COMPUTER,activityIntent,false);
+                reportForVia(Constants.VIA_REPORT_TYPE_DATALINE, shareType, Constants.VIA_RESULT_SUCCESS);
+            } catch (Exception e) {
+                SLog.e(TAG, "-->sendToMyComputer, start activity exception.", e);
+                reportForVia(Constants.VIA_REPORT_TYPE_DATALINE, shareType, Constants.VIA_RESULT_FAIL);
+                showQQVersionTipsPage(activity);
+            }
+        } else {
+            SLog.w(TAG, "-->sendToMyComputer, there is no activity, show download page.");
+            reportForVia(Constants.VIA_REPORT_TYPE_DATALINE, shareType, Constants.VIA_RESULT_FAIL);
+            showQQVersionTipsPage(activity);
+        }
+
+        SLog.i(TAG, "sendToMyComputer() --end");
+    }
+
+    public void shareToTroopBar(Activity activity, Bundle params, IUiListener listener) {
+        SLog.i(TAG, "shareToTroopBar() -- start");
+        int paramErrCode = Constants.ERROR_PARAM;
+        String paramErrMsg = Constants.MSG_PARAM_ERROR;
+        if (null == listener) {
+            SLog.e(TAG, "listener is null!");
+            return;
+        }
+
+        if (null == activity || null == params) {
+            String detail = "activity or params is null!";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+
+        String title = params.getString(QQFAV_DATALINE_TITLE);
+        if (TextUtils.isEmpty(title)) {
+            listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR + ": title is null",
+                    null));
+            SLog.e(TAG, "shareToTroopBar() -- title is null");
+            return;
+        }
+        if (title.length() < 4 || title.length() > 25) {
+            listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR + ": title size: 4 ~ 25",
+                    null));
+            SLog.e(TAG, "shareToTroopBar() -- title size: 4 ~ 25");
+            return;
+        }
+
+        String description = params.getString(QQFAV_DATALINE_DESCRIPTION);
+        if (TextUtils.isEmpty(description)) {
+            listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR
+                    + ": description is null", null));
+            SLog.e(TAG, "shareToTroopBar() -- description is null");
+            return;
+        }
+        if (description.length() < 10 || description.length() > 700) {
+            listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR
+                    + ": description size: 10 ~ 700", null));
+            SLog.e(TAG, "shareToTroopBar() -- description size: 10 ~ 700");
+            return;
+        }
+
+        ArrayList<String> fileDataList = params.getStringArrayList(QQFAV_DATALINE_FILEDATA); // 本地图片地址
+        StringBuffer sbFileData = new StringBuffer();
+        if (null != fileDataList && fileDataList.size() > 0) {
+            String localPath = "";
+            int size = fileDataList.size();
+            if (size > 9) {
+                listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR
+                        + ": file_data size: 1 ~ 9", null));
+                SLog.e(TAG, "shareToTroopBar() -- file_data size: 1 ~ 9");
+                return;
+            }
+            for (int i = 0; i < size; i++) {
+                localPath = fileDataList.get(i).trim();
+                if (!localPath.startsWith("/")) {
+                    // 不是本地图片，则返回
+                    listener.onError(new UiError(Constants.ERROR_UNKNOWN, Constants.MSG_PARAM_ERROR, "file_data应该为本地图片"));
+                    SLog.e(TAG, "shareToTroopBar(): " + "file_data应该为本地图片");
+                    return;
+                }
+                if (localPath.startsWith("/")) {
+                    File file = new File(localPath);
+                    if (!file.exists()) {
+                        // 文件不存在, 表示不是合法的本地路径
+                        listener.onError(new UiError(Constants.ERROR_UNKNOWN, Constants.MSG_PARAM_ERROR, "图片文件不存在"));
+                        SLog.e(TAG, "shareToTroopBar(): " + "图片文件不存在");
+                        return;
+                    }
+                }
+            }
+
+            for (int i = 0; i < size; i++) {
+                try {
+                    sbFileData.append(URLEncoder.encode(fileDataList.get(i).trim(), "UTF-8"));
+                } catch (UnsupportedEncodingException e) {
+                    // TODO Auto-generated catch block
+                    e.printStackTrace();
+                    SLog.e(TAG, "UnsupportedEncodingException: ", e);
+                    sbFileData.append(URLEncoder.encode(fileDataList.get(i).trim()));
+                }
+                if (i != size - 1) {
+                    sbFileData.append(";");
+                }
+            }
+        }
+        String troopbarId = params.getString(TROOPBAR_ID);
+        if (!TextUtils.isEmpty(troopbarId) && !Util.isNumeric(troopbarId)) {
+            listener.onError(new UiError(Constants.ERROR_UNKNOWN, Constants.MSG_PARAM_ERROR + " troopbar_id 必须为数字",
+                    null));
+            SLog.e(TAG, "shareToTroopBar(): " + "troopbar_id 必须为数字");
+            return;
+        }
+
+        StringBuffer url = new StringBuffer(SHARE_TO_TROOP_BAR_RUL);
+        String appId = mToken.getAppId();
+        String openId = mToken.getOpenId();
+        SLog.v(TAG, "shareToTroopBar() -- openId: " + openId);
+        String appName = Util.getApplicationLable(activity);
+        if (!TextUtils.isEmpty(appId)) {
+            url.append("&share_id=" + appId);
+        }
+        if (!TextUtils.isEmpty(openId)) {
+            url.append("&open_id=" + Base64.encodeToString(Util.getBytesUTF8(openId), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appName)) {
+            String appN = appName;
+            if (appName.length() > 20) {
+                appN = appName.substring(0, 20) + "...";
+            }
+            url.append("&app_name=" + Base64.encodeToString(Util.getBytesUTF8(appN), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(title)) {
+            url.append("&title=" + Base64.encodeToString(Util.getBytesUTF8(title), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(description)) {
+            url.append("&description=" + Base64.encodeToString(Util.getBytesUTF8(description), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(troopbarId)) {
+            url.append("&troopbar_id=" + Base64.encodeToString(Util.getBytesUTF8(troopbarId), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(sbFileData)) {
+            url.append("&file_data=" + Base64.encodeToString(Util.getBytesUTF8(sbFileData.toString()), Base64.NO_WRAP));
+        }
+
+        SLog.v(TAG, "shareToTroopBar, url: " + url.toString());
+        TencentStat.trackCustomEvent(Global.getContext(), mToken, "requireApi", "shareToTroopBar");
+
+        Intent activityIntent = new Intent(Intent.ACTION_VIEW);
+        activityIntent.setData(Uri.parse(url.toString()));
+
+        String pkgName = activity.getPackageName();
+        if (!TextUtils.isEmpty(pkgName)) {
+        	activityIntent.putExtra("pkg_name", pkgName);
+        }
+
+        Object object = UIListenerManager.getInstance().setListnerWithAction(SystemUtils.TROOPBAR_CALLBACK_ACTION, listener);
+        if (null != object) {// 取消上一次的调用
+            //((IUiListener) object).onCancel();
+        }
+
+        // 接口需要手Q5.3版本支持
+        if (hasActivityForIntent(activityIntent) && !Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_5_3_0)) {
+            try {
+                startAssistActivity(activity, Constants.REQUEST_SHARE_TO_TROOP_BAR,activityIntent,false);
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                        Constants.VIA_SHARE_TO_TROOPBAR, Constants.VIA_REPORT_TYPE_SHARE_TO_TROOPBAR,
+                        Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_SUCCESS);
+            } catch (Exception e) {
+                SLog.e(TAG, "-->shareToTroopBar, start activity exception.", e);
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                        Constants.VIA_SHARE_TO_TROOPBAR, Constants.VIA_REPORT_TYPE_SHARE_TO_TROOPBAR,
+                        Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+                showQQVersionTipsPage(activity, SystemUtils.QQ_VERSION_NAME_5_3_0);
+            }
+        } else {
+            SLog.w(TAG, "-->shareToTroopBar, there is no activity, show download page.");
+            showQQVersionTipsPage(activity, SystemUtils.QQ_VERSION_NAME_5_3_0);
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                    Constants.VIA_SHARE_TO_TROOPBAR, Constants.VIA_REPORT_TYPE_SHARE_TO_TROOPBAR,
+                    Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+        }
+
+        SLog.i(TAG, "shareToTroopBar() -- end");
+    }
+    
+    public void sharePrizeToQQ(final Activity activity, Bundle params, final IUiListener listener) {
+        SLog.i(TAG, "sharePrizeToQQ() -- start");
+    	int paramErrCode = Constants.ERROR_PARAM;
+    	String paramErrMsg = Constants.MSG_PARAM_ERROR;
+        if (null == listener) {
+            SLog.e(TAG, "listener is null!");
+            return;
+        }
+
+        if (null == activity || null == params) {
+            String detail = "activity or params is null!";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+
+    	String title = params.getString(SHARE_PRIZE_TITLE);
+    	if (TextUtils.isEmpty(title)) {
+    		String detail = "sharePrizeToQQ failed, title is empty.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+    	String sumary = params.getString(SHARE_PRIZE_SUMMARY);
+    	if (TextUtils.isEmpty(sumary)) {
+    		String detail = "sharePrizeToQQ failed, sumary is empty.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+    	String imageUrl = params.getString(SHARE_PRIZE_IMAGE_URL);
+    	if (TextUtils.isEmpty(imageUrl) || !(imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
+    		String detail = "sharePrizeToQQ failed, imageUrl is empty or illegal.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+    	//拉取分享的页面需要使用
+    	final String activityid = params.getString(SHARE_PRIZE_ACTIVITY_ID);
+    	if (TextUtils.isEmpty(activityid)) {
+    		String detail = "sharePrizeToQQ failed, activityId is empty.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+    	
+    	//组装shareToQQ需要的参数,最终调用QQShare.shareToQQ
+    	final Bundle shareParams = new Bundle();
+    	shareParams.putString(QQShare.SHARE_TO_QQ_TITLE, title);
+    	shareParams.putString(QQShare.SHARE_TO_QQ_SUMMARY, sumary);
+    	shareParams.putString(QQShare.SHARE_TO_QQ_IMAGE_URL, imageUrl);
+    	shareParams.putInt(QQShare.SHARE_TO_QQ_KEY_TYPE, QQShare.SHARE_TO_QQ_TYPE_DEFAULT);
+    	
+        ThreadManager.executeOnSubThread(new Runnable() {
+			
+			@Override
+			public void run() {
+                Bundle paramsIN = composeLoginStateParams();
+                if (null == paramsIN) {
+                    String detail = "accesstoken or openid or appid is null, please login first!";
+                    SLog.e(TAG, detail);
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR, detail));
+                    return;
+                }
+				paramsIN.putString(SHARE_PRIZE_ACTIVITY_ID, activityid);
+				String url = ServerSetting.URL_PRIZE_MAKE_SHARE_URL;
+				JSONObject obj = null;
+				try {
+					obj = HttpUtils.request(mToken, activity.getApplicationContext(),
+							url, paramsIN, HttpGet.METHOD_NAME);
+				} catch (Exception e) {
+					SLog.e(TAG, "Exception occur in make_share_url", e);
+					listener.onError(new UiError(Constants.ERROR_IO, Constants.MSG_IO_ERROR, e.getMessage()));
+					return;
+				}
+
+				try {
+                    int code = obj.getInt("ret");
+                    int subCode = obj.getInt("subCode");
+                    if (code == 0 && subCode == 0) {
+                        String targetUrl = obj.getString("share_url");
+                        shareParams.putString(QQShare.SHARE_TO_QQ_TARGET_URL, targetUrl);
+                        QQShare qqShare = new QQShare(activity.getApplicationContext(), mToken);
+                        qqShare.shareToQQ(activity, shareParams, listener);
+					} else {
+						String errorMsg = obj.getString("msg");
+                        listener.onError(new UiError(code, "make_share_url error.", errorMsg));
+                        SLog.i(TAG, "code = " + code + ", subcode = " + "errormsg = " + errorMsg);
+					}
+				} catch (JSONException e) {
+                    SLog.e(TAG, "JSONException occur in make_share_url, errorMsg: " + e.getMessage());
+					listener.onError(new UiError(Constants.ERROR_JSON, Constants.MSG_JSON_ERROR, ""));
+				}
+			}
+		});
+        SLog.i(TAG, "sharePrizeToQQ() -- end");
+    }
+
+    public void queryUnexchangePrize(Context context, final Bundle params, final IUiListener listener) {
+        int paramErrCode = Constants.ERROR_PARAM;
+        String paramErrMsg = Constants.MSG_PARAM_ERROR;
+        if (null == listener) {
+            SLog.e(TAG, "listener is null!");
+            return;
+        }
+
+        if (null == params) {
+            String detail = "params is null!";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+
+        if (mToken == null || !mToken.isSessionValid()) {
+            String detail = "queryUnexchangePrize failed, auth token is illegal.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+    	if (context == null && Global.getContext() == null) {
+            String detail = "queryUnexchangePrize failed, context is null.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+
+        final String activityid = params.getString(SHARE_PRIZE_ACTIVITY_ID);
+        if (TextUtils.isEmpty(activityid)) {
+            String detail = "queryUnexchangePrize failed, activityId is empty.";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+    	final Context c = context == null ? Global.getContext() : context;
+        ThreadManager.executeOnSubThread(new Runnable() {
+
+			@Override
+			public void run() {
+                Bundle paramsIN = composeLoginStateParams();
+                if (null == paramsIN) {
+                    String detail = "accesstoken or openid or appid is null, please login first!";
+                    SLog.e(TAG, detail);
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR, detail));
+                    return;
+                }
+                paramsIN.putAll(params);
+				String url = ServerSetting.URL_PRIZE_QUERY_UNEXCHANGE;
+				JSONObject obj = null;
+				try {
+					obj = HttpUtils.request(mToken, c, url, paramsIN, HttpGet.METHOD_NAME);
+				} catch (Exception e) {
+                    SLog.e(TAG, "Exception occur in queryUnexchangePrize", e);
+					listener.onError(new UiError(Constants.ERROR_IO, Constants.MSG_IO_ERROR,
+							e.getMessage()));
+					return;
+				}
+
+				listener.onComplete(obj);
+			}
+		});
+    }
+
+    public void exchangePrize(Context context, final Bundle params, final IUiListener listener) {
+        int paramErrCode = Constants.ERROR_PARAM;
+        String paramErrMsg = Constants.MSG_PARAM_ERROR;
+
+        if (null == listener) {
+            SLog.e(TAG, "exchangePrize listener is null!");
+            return;
+        }
+
+        if (null == params) {
+            String detail = "exchangePrize params is null!";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+
+        if (mToken == null || !mToken.isSessionValid()) {
+            String detail = "exchangePrize failed, auth token is illegal.";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+        if (context == null && Global.getContext() == null) {
+            String detail = "exchangePrize failed, context is null.";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+
+        ArrayList<String> shareIdList = params.getStringArrayList(SHARE_PRIZE_SHARE_ID_LIST);
+        if (null ==shareIdList) {
+            String detail = "exchangePrize failed, shareid_list is empty.";
+            SLog.e(TAG, detail);
+            listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+            return;
+        }
+        final StringBuffer sbShareId = new StringBuffer("");
+        int size = shareIdList.size();
+        String shareid = "";
+        for (int i = 0; i < size; i++) {
+            shareid = shareIdList.get(i);
+            if (!TextUtils.isEmpty(shareid)) {
+                sbShareId.append(shareid);
+                if (i < size - 1) {
+                    sbShareId.append(",");
+                }
+            }
+        }
+        final Context c = context == null ? Global.getContext() : context;
+        ThreadManager.executeOnSubThread(new Runnable() {
+
+            @Override
+            public void run() {
+                Bundle paramsIN = composeLoginStateParams();
+                if (null == paramsIN) {
+                    String detail = "accesstoken or openid or appid is null, please login first!";
+                    SLog.e(TAG, detail);
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR, detail));
+                    return;
+                }
+                paramsIN.putString(SHARE_PRIZE_SHARE_ID, sbShareId.toString());
+                paramsIN.putString("imei", MobileInfoUtil.getImei(Global.getContext()));
+                String url = ServerSetting.URL_PRIZE_EXCHANGE;
+                JSONObject obj = null;
+                try {
+                    obj = HttpUtils.request(mToken, c, url, paramsIN, HttpGet.METHOD_NAME);
+                } catch (Exception e) {
+                    SLog.e(TAG, "Exception occur in exchangePrize", e);
+                    listener.onError(new UiError(Constants.ERROR_IO, Constants.MSG_IO_ERROR, e.getMessage()));
+                    return;
+                }
+
+                listener.onComplete(obj);
+            }
+        });
+    }
+
+    private Bundle composeLoginStateParams() {
+        if (null == mToken) {
+            return null;
+        }
+        Bundle params = new Bundle();
+        String appid = mToken.getAppId();
+        String openid = mToken.getOpenId();
+        String accesstoken = mToken.getAccessToken();
+        if (TextUtils.isEmpty(appid) || TextUtils.isEmpty(openid) || TextUtils.isEmpty(accesstoken)) {
+            SLog.e(TAG, "composeLoginStateParams fail, accesstoken or openid or appid is null");
+            return null;
+        }
+        params.putString(Constants.PARAM_APP_ID, mToken.getAppId());
+        params.putString(Constants.PARAM_OPEN_ID, mToken.getOpenId());
+        params.putString("accesstoken", mToken.getAccessToken());
+        return params;
+    }
+
+    public void isActivityAvailable(final Activity activity, final String activityid, final IUiListener listener) {
+    	int paramErrCode = Constants.ERROR_PARAM;
+    	String paramErrMsg = Constants.MSG_PARAM_ERROR;
+    	if (TextUtils.isEmpty(activityid)) {
+    		String detail = "isActivityAvailable failed, activityId is null.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+        if (mToken == null || !mToken.isSessionValid()) {
+    		String detail = "exchangePrize failed, auth token is illegal.";
+    		SLog.e(TAG, detail);
+    		listener.onError(new UiError(paramErrCode, paramErrMsg, detail));
+    		return;
+    	}
+        ThreadManager.executeOnSubThread(new Runnable() {
+			
+			@Override
+			public void run() {
+                Bundle paramsIN = composeLoginStateParams();
+                if (null == paramsIN) {
+                    String detail = "accesstoken or openid or appid is null, please login first!";
+                    SLog.e(TAG, detail);
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR, detail));
+                    return;
+                }
+                paramsIN.putString(SHARE_PRIZE_ACTIVITY_ID, activityid);
+				String url = ServerSetting.URL_PRIZE_GET_ACTIVITY_STATE;
+				JSONObject obj = null;
+				try {
+					obj = HttpUtils.request(mToken, activity.getApplicationContext(),
+							url, paramsIN, HttpGet.METHOD_NAME);
+				} catch (Exception e) {
+					SLog.e(TAG, "Exception occur in make_share_url", e);
+					listener.onError(new UiError(Constants.ERROR_UNKNOWN, "Exception occur in make_share_url",
+							e.getMessage()));
+					return;
+				}
+
+				listener.onComplete(obj);
+			}
+		});
+    }
+
+    private boolean checkFavoritesDatalineParams(Activity activity, Bundle params, IUiListener listener) {
+        if (null == activity || null == params || null == listener) {
+            SLog.e(TAG, "activity or params or listener is null!");
+            return false;
+        }
+        final int shareType = params.getInt(QQFAV_DATALINE_REQTYPE, QQFAV_DATALINE_TYPE_DEFAULT);
+        String appName = params.getString(QQFAV_DATALINE_APPNAME);
+        if (TextUtils.isEmpty(appName)) {
+            listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR + ": app_name", null));
+            return false;
+        }
+        String summary = params.getString(QQFAV_DATALINE_DESCRIPTION);
+        String targetUrl = params.getString(QQFAV_DATALINE_URL);
+        String audioUrl = params.getString(QQFAV_DATALINE_AUDIOURL);
+        String imageUrl = params.getString(QQFAV_DATALINE_IMAGEURL);
+        ArrayList<String> fileDataList = params.getStringArrayList(QQFAV_DATALINE_FILEDATA);
+        switch (shareType) {
+            case QQFAV_DATALINE_TYPE_TEXT:
+                if (TextUtils.isEmpty(summary)) {
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR
+                            + ": description is null", null));
+                    return false;
+                }
+                break;
+            case QQFAV_DATALINE_TYPE_IMAGE_TEXT:
+                if (null == fileDataList || fileDataList.size() == 0) {
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR
+                            + ": fill_data is null", null));
+                    return false;
+                }
+
+                {
+                    String localPath = "";
+                    int size = fileDataList.size();
+                    for (int i = 0; i < size; i++) {
+                        localPath = fileDataList.get(i).trim();
+                        if (localPath.startsWith("/")) {
+                            File file = new File(localPath);
+                            if (!file.exists()) {
+                                // 文件不存在, 表示不是合法的本地路径
+                                listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                                        Constants.MSG_PARAM_IMAGE_URL_FORMAT_ERROR, null));
+                                return false;
+                            }
+                        }
+                    }
+                }
+                break;
+            case QQFAV_DATALINE_TYPE_DEFAULT:
+                if (TextUtils.isEmpty(targetUrl) || TextUtils.isEmpty(imageUrl)) {
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR
+                            + ": image_url or url is null",
+                            null));
+                    return false;
+                }
+                break;
+            case QQFAV_DATALINE_TYPE_AUDIO:
+                if (TextUtils.isEmpty(targetUrl) || TextUtils.isEmpty(imageUrl) || TextUtils.isEmpty(audioUrl)) {
+                    listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_NULL_ERROR
+                            + ": image_url or url or audioUrl is null", null));
+                    return false;
+                }
+                break;
+            default:
+                listener.onError(new UiError(Constants.ERROR_PARAM, Constants.MSG_PARAM_ERROR
+                        + ": unknow req_type", null));
+                return false;
+        }
+
+        return true;
+    }
+
+    @Override
+    public void releaseResource() {
+        SLog.i(TAG, "releaseResource() -- start");
+        SLog.i(TAG, "releaseResource() -- end");
+    }
+
+    private void showQQVersionTipsPage(Activity activity) {
+        showQQVersionTipsPage(activity, "");
+    }
+
+    private void showQQVersionTipsPage(Activity activity, String needVersion) {
+        new TDialog(activity, "", getCommonDownloadQQUrl(needVersion), null, mToken).show();
+    }
+
+    private void reportForVia(String reportType, int type, String result) {
+        if (TextUtils.isEmpty(reportType) || TextUtils.isEmpty(result)) {
+            SLog.v(TAG, "reportForVia() error: reportType or result is null");
+            return;
+        }
+        String shareType = "";
+        switch (type) {
+            case QQFAV_DATALINE_TYPE_TEXT:
+                shareType = Constants.VIA_SHARE_TYPE_TEXT;
+                break;
+            case QQFAV_DATALINE_TYPE_IMAGE_TEXT:
+                shareType = Constants.VIA_SHARE_TYPE_IMAGE_TEXT;
+                break;
+            case QQFAV_DATALINE_TYPE_AUDIO:
+                shareType = Constants.VIA_SHARE_TYPE_MUSIC;
+                break;
+            case QQFAV_DATALINE_TYPE_DEFAULT:
+                shareType = Constants.VIA_SHARE_TYPE_INFO;
+                break;
+            default:
+                SLog.e(TAG, "GameAppOperation -- reportForVia() error: unknow type "
+                        + String.valueOf(type));
+                return;
+        }
+        OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SDK, reportType,
+                Constants.VIA_ACT_TYPE_TWENTY_EIGHT, result, shareType, Constants.VIA_NO_VALUE, Constants.STR_EMPTY,
+                Constants.STR_EMPTY);
+    }
+}

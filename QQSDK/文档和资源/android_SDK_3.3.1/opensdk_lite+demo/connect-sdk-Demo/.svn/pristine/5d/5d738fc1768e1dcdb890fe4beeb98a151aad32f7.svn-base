@@ -1,0 +1,287 @@
+package com.tencent.connect.common;
+
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.content.Intent;
+
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+
+public class UIListenerManager {
+	
+	private static final String TAG = SLog.TAG + ".UIListenerManager";
+	
+	private static UIListenerManager mInstance = null;
+	
+	public static UIListenerManager getInstance(){
+		if(mInstance == null){
+			mInstance = new UIListenerManager();
+		}
+		
+		return mInstance;
+	}
+	
+	private UIListenerManager(){
+		if(mListenerMap == null){
+			mListenerMap = Collections.synchronizedMap(new HashMap<String, ApiTask>());
+		}
+	}
+	
+	public Object setListenerWithRequestcode(int requestCode, IUiListener listener){
+		String action = SystemUtils.getActionFromRequestcode(requestCode);
+		if(action == null){
+			SLog.e(TAG, "setListener action is null! rquestCode=" + requestCode);
+			return null;
+		}
+		
+		ApiTask preTask = null;
+		synchronized (mListenerMap) {
+			preTask = (ApiTask)mListenerMap.put(action, new ApiTask(requestCode, listener));
+		}
+		
+		if(preTask == null){
+			return null;
+		}else{
+			return preTask.mListener;
+		}
+	}
+	
+	public Object setListnerWithAction(String action, IUiListener listener){
+		int requestCode = SystemUtils.getRequestCodeFromCallback(action);
+		if(requestCode == -1){
+			SLog.e(TAG, "setListnerWithAction fail, action = " + action);
+			return null;
+		}
+		
+		ApiTask preTask = null;
+		synchronized (mListenerMap) {
+			preTask = (ApiTask)mListenerMap.put(action, new ApiTask(requestCode, listener));
+		}
+		
+		if(preTask == null){
+			return null;
+		}else{
+			return preTask.mListener;
+		}
+	}
+	
+	public IUiListener getListnerWithRequestCode(int requestCode){
+		String action = SystemUtils.getActionFromRequestcode(requestCode);
+		
+		if(action == null){
+			SLog.e(TAG, "getListner action is null! rquestCode=" + requestCode);
+			return null;
+		}
+		
+		return getListnerWithAction(action);
+	}
+	
+	public IUiListener getListnerWithAction(String action){
+		if(action == null){
+			SLog.e(TAG, "getListnerWithAction action is null!");
+			return null;
+		}
+		
+		ApiTask retTask = null;
+		synchronized (mListenerMap) {
+			retTask = (ApiTask) mListenerMap.get(action);
+			mListenerMap.remove(action);
+		}
+		if(retTask == null){
+			return null;
+		}else{
+			return retTask.mListener;
+		}
+	}
+	
+	/**
+     * 解析登录/分享的回调数据到listener
+     * 
+     * @param data
+     * @param listener
+     */
+    public void handleDataToListener(Intent data, IUiListener listener) {
+    	SLog.i(TAG, "handleDataToListener");
+    	//手Q在授权界面直接点返回键返回的时候没有给intent,只给了resultCode=Activity.RESULT_CANCELED
+    	if (data == null) {
+    		listener.onCancel();
+    		return;
+    	}
+    	
+    	String action = data.getStringExtra(Constants.KEY_ACTION);
+    	
+    	if (SystemUtils.ACTION_LOGIN.equals(action)) { //登录
+    		final int error = data.getIntExtra(Constants.KEY_ERROR_CODE, 0);
+            if (error == 0) {
+                final String response = data.getStringExtra(Constants.KEY_RESPONSE);
+                if (response != null) {
+                    try {
+                        final JSONObject jsonObject = Util.parseJson(response);
+                        listener.onComplete(jsonObject);
+                    } catch (final JSONException e) {
+                        listener.onError(new UiError(Constants.ERROR_JSON,
+                                Constants.MSG_JSON_ERROR, response));
+                        SLog.e(TAG,
+                                "OpenUi, onActivityResult, json error", e);
+                    }
+                } else {
+                    SLog.d(TAG,
+                            "OpenUi, onActivityResult, onComplete");
+                    listener.onComplete(/*null*/new JSONObject());
+                }
+            } else {
+                SLog.e(TAG, "OpenUi, onActivityResult, onError = " + error + "");
+                final String msg = data.getStringExtra(Constants.KEY_ERROR_MSG);
+                final String detail = data.getStringExtra(Constants.KEY_ERROR_DETAIL);
+                listener.onError(new UiError(error, msg, detail));
+            }
+    	} else if (SystemUtils.ACTION_SHARE.equals(action)) { //分享类接口
+    		String result = data.getStringExtra("result");
+            String responseString = data.getStringExtra("response");
+            
+            if("cancel".equals(result)){
+                listener.onCancel();            
+            }else if("error".equals(result)){
+                listener.onError(
+                        new UiError(Constants.ERROR_UNKNOWN, "unknown error", responseString + ""));
+            }else if("complete".equals(result)){
+                try {
+                    JSONObject response = new JSONObject(responseString == null ? "{\"ret\": 0}" : responseString);
+                    listener.onComplete(response);             
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                    listener.onError(
+                            new UiError(Constants.ERROR_JSON, "json error", responseString + ""));
+                }
+            }
+    	}      
+    }
+    
+    private IUiListener buildListener(int reqCode, IUiListener listener){
+    	IUiListener retListener = listener;
+    	if(reqCode == Constants.REQUEST_LOGIN){
+    		//retListener = new FeedConfirmListener(listener);;
+    		SLog.e(TAG,"登录的接口回调不能重新构建，暂时无法提供，先记录下来这种情况是否存在");
+    	}else if(reqCode == Constants.REQUEST_SOCIAL_API){
+    		SLog.e(TAG,"Social Api 的接口回调需要使用param来重新构建，暂时无法提供，先记录下来这种情况是否存在");
+    	}else if(reqCode == Constants.REQUEST_SOCIAL_H5){
+    		SLog.e(TAG,"Social Api 的H5接口回调需要使用param来重新构建，暂时无法提供，先记录下来这种情况是否存在");
+    	}
+    	
+    	return retListener;
+    }
+    
+    public boolean onActivityResult(int requestCode, int resultCode, Intent data, IUiListener listener) {
+    	SLog.i(TAG,"onActivityResult req=" + requestCode + " res=" + resultCode);
+    	
+    	IUiListener curListener = getListnerWithRequestCode(requestCode);
+    	
+    	if(curListener == null){
+    		if(listener != null){
+    			curListener = buildListener(requestCode, listener);
+    		}else{
+    			SLog.e(TAG,"onActivityResult can't find the listener");
+        		return false;
+    		}
+    	}
+    	
+    	if (resultCode == Constants.ACTIVITY_OK) {
+            if (null == data) {
+            	curListener.onError(new UiError(Constants.ERROR_UNKNOWN, "onActivityResult intent data is null.",
+                        "onActivityResult intent data is null."));
+                return true;
+            }
+            
+            String action = data.getStringExtra(Constants.KEY_ACTION);
+        	
+        	if (SystemUtils.ACTION_LOGIN.equals(action)) { //登录
+        		final int error = data.getIntExtra(Constants.KEY_ERROR_CODE, 0);
+                if (error == 0) {
+                    final String response = data.getStringExtra(Constants.KEY_RESPONSE);
+                    if (response != null) {
+                        try {
+                            final JSONObject jsonObject = Util.parseJson(response);
+                            curListener.onComplete(jsonObject);
+                        } catch (final JSONException e) {
+                        	curListener.onError(new UiError(Constants.ERROR_JSON,
+                                    Constants.MSG_JSON_ERROR, response));
+                            SLog.e(TAG,
+                                    "OpenUi, onActivityResult, json error", e);
+                        }
+                    } else {
+                        SLog.d(TAG,
+                                "OpenUi, onActivityResult, onComplete");
+                        curListener.onComplete(/*null*/new JSONObject());
+                    }
+                } else {
+                    SLog.e(TAG, "OpenUi, onActivityResult, onError = " + error + "");
+                    final String msg = data.getStringExtra(Constants.KEY_ERROR_MSG);
+                    final String detail = data.getStringExtra(Constants.KEY_ERROR_DETAIL);
+                    curListener.onError(new UiError(error, msg, detail));
+                }
+        	} else if (SystemUtils.ACTION_SHARE.equals(action)) { //分享类接口
+        		String result = data.getStringExtra("result");
+                String responseString = data.getStringExtra("response");
+                
+                if("cancel".equals(result)){
+                	curListener.onCancel();            
+                }else if("error".equals(result)){
+                	curListener.onError(
+                            new UiError(Constants.ERROR_UNKNOWN, "unknown error", responseString + ""));
+                }else if("complete".equals(result)){
+                    try {
+                        JSONObject response = new JSONObject(responseString == null ? "{\"ret\": 0}" : responseString);
+                        curListener.onComplete(response);             
+                    } catch (JSONException e) {
+                        e.printStackTrace();
+                        curListener.onError(
+                                new UiError(Constants.ERROR_JSON, "json error", responseString + ""));
+                    }
+                }
+        	}else{
+	            int error = data.getIntExtra(Constants.KEY_ERROR_CODE, 0);
+	    		if (error == 0) {
+	    			String response = data.getStringExtra(Constants.KEY_RESPONSE);
+					if (response != null) {
+						try {
+							JSONObject jsonObject = Util.parseJson(response);
+							curListener.onComplete(jsonObject);
+						} catch (JSONException e) {
+							curListener.onError(new UiError(Constants.ERROR_JSON,
+									Constants.MSG_JSON_ERROR, response));
+						}
+					} else {
+						curListener.onComplete(/*null*/new JSONObject());
+					}
+	    		} else {
+	                String msg = data.getStringExtra(Constants.KEY_ERROR_MSG);
+	                String detail = data.getStringExtra(Constants.KEY_ERROR_DETAIL);
+	                curListener.onError(new UiError(error, msg, detail));
+	    		}
+        	}
+		} else {
+			curListener.onCancel();
+		}
+    	
+    	return true;
+    }
+	
+	private Map<String,ApiTask> mListenerMap = Collections.synchronizedMap(new HashMap<String, ApiTask>());
+
+	public class ApiTask {
+		public ApiTask(int requestCode, IUiListener listener) {
+			mRequestCode = requestCode;
+			mListener = listener;
+		}
+		public int mRequestCode;
+		public IUiListener mListener;
+	}
+}

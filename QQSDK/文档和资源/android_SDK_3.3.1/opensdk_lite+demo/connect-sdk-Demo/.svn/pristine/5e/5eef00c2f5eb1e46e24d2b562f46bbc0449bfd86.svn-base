@@ -1,0 +1,13 @@
+# coding:utf8
+import sys
+import zipfile
+
+if __name__ == '__main__':
+    number, path = sys.argv[1:3]
+
+    print 'write %s >> %s' % (number, path)
+
+    fp = zipfile.ZipFile(path, 'a')
+    fp.comment = number + '\ninsertlog'
+    fp._didModify = True # must be True
+    fp.close()

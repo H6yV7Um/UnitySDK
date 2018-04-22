@@ -1,0 +1,84 @@
+/**
+ * @hide
+ */
+package com.tencent.tauth;
+
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.SocketTimeoutException;
+
+import org.apache.http.conn.ConnectTimeoutException;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import com.tencent.open.utils.HttpUtils.HttpStatusException;
+import com.tencent.open.utils.HttpUtils.NetworkUnavailableException;
+
+/**
+ * 调用 {@link Tencent#requestAsync(String, android.os.Bundle, String, IRequestListener, Object)}时使用的异步回调接口 
+ * @hide
+ */
+public interface IRequestListener {
+    /**
+     * 当请求完成后，会调用此方法。<br>
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param response 服务器返回的json结果
+     */
+    public void onComplete(JSONObject response);
+
+    /**
+     * 发生网络或IO错误时，会调用此方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onIOException(IOException e);
+
+    /**
+     * URL格式错误时，会调用该方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onMalformedURLException(MalformedURLException e);
+
+    /**
+     * 后台返回的数据不是json格式时，或者数据格式化成json出错时，会调用该方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onJSONException(JSONException e);
+
+    /**
+     * 建立网络链接异常时，会调用此方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onConnectTimeoutException(ConnectTimeoutException e);
+
+    /**
+     * 网络请求异常时，会调用此方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onSocketTimeoutException(SocketTimeoutException e);
+
+    /**
+     * 网络不可用时，会调用此方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onNetworkUnavailableException(NetworkUnavailableException e);
+
+    /**
+     * http返回码为非200时，会调用此方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onHttpStatusException(HttpStatusException e);
+
+    /**
+     * 发生未知错误时会调用此方法。
+     * <b>注意：这是个后台线程，不要在这个方法中修改UI。</b>
+     * @param e
+     */
+    public void onUnknowException(Exception e);
+}

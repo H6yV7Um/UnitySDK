@@ -1,0 +1,189 @@
+
+package com.tencent.open.utils;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+import android.widget.Toast;
+
+import java.lang.ref.WeakReference;
+import java.net.URL;
+
+import com.tencent.open.log.SLog;
+
+public class ServerSetting {
+    private static final String TAG = SLog.TAG + ".ServerSetting";
+
+    /**
+     * 正式环境
+     */
+    public static final int ENVIRONMENT_NORMOL = 0;
+    /**
+     * 体验环境
+     */
+    public static final int ENVIRONMENT_EXPERIENCE = 1;
+    
+    private static final String KEY_OPEN_ENV_RELEASE = "formal";
+    private static final String KEY_OPEN_ENV_EXPE = "exp";
+    
+    // 服务器配置化相关常量定义
+    public static final String KEY_OPEN_SETTING = "OpenSettings";
+    public static final String KEY_OPEN_ENV = "OpenEnvironment";
+    public static final String KEY_HOST_FUSION = "fusion.qq.com";
+    public static final String KEY_HOST_APPIC = "appic.qq.com";
+    public static final String KEY_HOST_OPEN_MOBILE = "openmobile.qq.com";
+    public static final String KEY_HOST_MAPP_QZONE = "mapp.qzone.qq.com";
+    public static final String KEY_HOST_ANALY = "analy.qq.com";
+    public static final String KEY_HOST_QZAPP_QLOGO = "qzapp.qlogo.cn";
+    public static final String KEY_HOST_I_GTIMG = "i.gtimg.cn";
+    public static final String KEY_HOST_APP_SUPPORT = "appsupport.qq.com";
+    public static final String KEY_HOST_QZS_QQ = "qzs.qq.com";
+    
+    private static final String SERVER_TYPE = "ServerType";
+    private static final String SERVER_PREFS = "ServerPrefs";
+    public static final String DEFAULT_REDIRECT_URI = "auth://tauth.qq.com/";
+    public static final String DEFAULT_CGI_AUTHORIZE = "https://openmobile.qq.com/oauth2.0/m_authorize?";
+    public static final String DEFAULT_URL_SEND_STORY = "http://qzs.qq.com/open/mobile/sendstory/sdk_sendstory_v1.3.html?";
+    public static final String DEFAULT_URL_INVITE = "http://qzs.qq.com/open/mobile/invite/sdk_invite.html?";
+    public static final String DEFAULT_URL_REPORT = "http://wspeed.qq.com/w.cgi";
+    public static final String DEFAULT_URL_GRAPH_BASE = "https://openmobile.qq.com/";
+    public static final String DEFAULT_URL_BRAG = "http://qzs.qq.com/open/mobile/brag/sdk_brag.html?";
+    public static final String DEFAULT_URL_ASK = "http://qzs.qq.com/open/mobile/request/sdk_request.html?";
+    public static final String DEFAULT_URL_GIFT = "http://qzs.qq.com/open/mobile/request/sdk_request.html?";
+    public static final String DEFAULT_LOCAL_STORAGE_URI = "http://qzs.qq.com";
+    public static final String DEFAULT_URL_VOICE = "http://qzs.qq.com/open/mobile/not_support.html?";
+    public static final String DEFAULT_URL_REACTIVE = "http://qzs.qq.com/open/mobile/reactive/sdk_reactive.html?";
+    
+    public static final String DOWNLOAD_QQ_URL = "http://qzs.qq.com/open/mobile/login/qzsjump.html?";
+    //通用的手Q下载地址，除登录以外。
+    public static final String DOWNLOAD_QQ_URL_COMMON = "http://qzs.qq.com/open/mobile/sdk_common/down_qq.htm?";
+    
+    public static final String CGI_FETCH_QQ_URL = "http://fusion.qq.com/cgi-bin/qzapps/mapp_getappinfo.cgi";
+    
+    public static final String APP_DETAIL_PAGE = "http://fusion.qq.com/cgi-bin/qzapps/unified_jump?appid=%1$s&from=%2$s&isOpenAppID=1";
+    
+    public static final String URL_FUSION_BASE = "http://fusion.qq.com";
+    public static final String URL_FUSION_CGI_BASE = URL_FUSION_BASE + "/cgi-bin";
+    // 有奖分享，获取分享的targeturl
+    public static final String URL_PRIZE_MAKE_SHARE_URL = URL_FUSION_CGI_BASE + "/prize_sharing/make_share_url.cgi";
+    // 获取当前活动的状态
+    public static final String URL_PRIZE_GET_ACTIVITY_STATE = URL_FUSION_CGI_BASE + "/prize_sharing/get_activity_state.cgi";
+    // 获取未兑奖信息
+    public static final String URL_PRIZE_QUERY_UNEXCHANGE = URL_FUSION_CGI_BASE + "/prize_sharing/query_unexchange_prize.cgi";
+    // 获取未兑奖信息
+    public static final String URL_PRIZE_EXCHANGE = URL_FUSION_CGI_BASE + "/prize_sharing/exchange_prize.cgi";
+    
+    /**
+     * 根据传入的need_version 来显示不同的手Q提示模版页面
+     */
+    public static final String NEED_QQ_VERSION_TIPS_URL = "http://openmobile.qq.com/oauth2.0/m_jump_by_version?";
+
+    private static ServerSetting sServerSetting = null;
+    private volatile WeakReference<SharedPreferences> mWeakSharedPrefs = null;
+
+
+    public synchronized static ServerSetting getInstance() {
+        if (sServerSetting == null) {
+            sServerSetting = new ServerSetting();
+        }
+        return sServerSetting;
+    }
+
+    /**
+     * 切换服务器配置，是配置立即生效
+     */
+    public void changeServer() {
+        mWeakSharedPrefs = null;
+    }
+    
+    /**
+     * 根据原始url获取当前配置环境的url，主要是把当前url中的host替换为当前环境配置的host
+     * 
+     * @param context
+     * @param url 原始请求的url，必须包含host
+     * @return 如果url对应的host与当前环境host相同，则不做任何改变，如果不同，则替换url中的host为当前配置环境的host
+     */
+    public String getEnvUrl(Context context, String url) {
+        if (mWeakSharedPrefs == null || mWeakSharedPrefs.get() == null) {
+            SharedPreferences sp = context.getSharedPreferences(SERVER_PREFS, 0);
+            mWeakSharedPrefs = new WeakReference<SharedPreferences>(sp);
+        }
+        try {
+            URL urlobj = new URL(url);
+            String host = urlobj.getHost();
+            if (host == null) {
+                SLog.e(TAG, "Get host error. url=" + url);
+                return url;
+            }
+            String envHost = mWeakSharedPrefs.get().getString(host, null);
+            if (envHost == null || host.equals(envHost)) {
+                SLog.v(TAG, "host=" + host + ", envHost=" + envHost);
+                return url;
+            }
+            url = url.replace(host, envHost);
+            SLog.v(TAG, "return environment url : " + url);
+            return url;
+
+        } catch (Exception e) {
+            SLog.e(TAG, "getEnvUrl url=" + url + "error.: " + e.getMessage());
+            return url;
+        }
+    }
+
+    /**
+     * 切换环境
+     * 
+     * @param context 第三方应用传入的context
+     * @param which 参考{@link ServerSetting#ENVIRONMENT_NORMOL}和
+     *            {@link ServerSetting#ENVIRONMENT_EXPERIENCE}
+     */
+    public void setEnvironment(Context context, int which) {
+        if (context != null && (mWeakSharedPrefs == null || mWeakSharedPrefs.get() == null)) {
+            SharedPreferences sp = context.getSharedPreferences(SERVER_PREFS, 0);
+            mWeakSharedPrefs = new WeakReference<SharedPreferences>(sp);
+        }
+        if (which != 0 && which != 1) {
+            SLog.e(TAG, "切换环境参数错误，正式环境为0，体验环境为1");
+            return;
+        }
+        switch (which) {
+            case ENVIRONMENT_NORMOL: {
+                Editor e = mWeakSharedPrefs.get().edit();
+                if (null == e) {
+                    return;
+                }
+                e.putInt(SERVER_TYPE, 0);
+                
+                e.putString(KEY_OPEN_ENV, KEY_OPEN_ENV_RELEASE);
+               
+                e.putString(KEY_HOST_QZS_QQ, "qzs.qq.com");
+
+                e.putString(KEY_HOST_OPEN_MOBILE, "openmobile.qq.com");
+
+                e.commit();
+                
+                changeServer();
+                Toast.makeText(context, "已切换到正式环境", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            case ENVIRONMENT_EXPERIENCE: {
+                Editor e = mWeakSharedPrefs.get().edit();
+                if (null == e) {
+                    return;
+                }
+                e.putInt(SERVER_TYPE, 1);
+                
+                e.putString(KEY_OPEN_ENV, KEY_OPEN_ENV_EXPE);
+                
+                e.putString(KEY_HOST_QZS_QQ, "testmobile.qq.com");
+
+                e.putString(KEY_HOST_OPEN_MOBILE, "test.openmobile.qq.com");
+                e.commit();
+                changeServer();
+                Toast.makeText(context, "已切换到体验环境", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        }
+    }
+}

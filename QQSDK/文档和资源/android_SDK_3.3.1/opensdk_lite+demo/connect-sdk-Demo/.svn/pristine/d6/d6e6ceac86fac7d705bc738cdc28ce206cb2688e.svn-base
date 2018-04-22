@@ -1,0 +1,52 @@
+package com.tencent.open.web.security;
+
+import android.content.Context;
+
+import com.tencent.connect.auth.AuthAgent;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+
+import java.io.File;
+
+public class JniInterface {
+
+	private static final String TAG = SLog.TAG + ".JniInterface";
+	/**
+	 * 标记so是否加载成功，下面的jni方法是否可用
+	 */
+	public static boolean isJniOk = false;
+
+	public static void loadSo() {
+		if (isJniOk) {
+			return;
+		}
+		try {
+			Context context = Global.getContext();
+			if (context != null) {
+				File libFile = new File(context.getFilesDir().toString() + "/" + AuthAgent.SECURE_LIB_NAME);
+				if (libFile.exists()) {
+					System.load(context.getFilesDir().toString() + "/" + AuthAgent.SECURE_LIB_NAME);
+					JniInterface.isJniOk = true;
+					SLog.i(TAG, "-->load lib success:"+AuthAgent.SECURE_LIB_NAME);
+				} else {
+					SLog.i(TAG, "-->fail, because so is not exists:"+AuthAgent.SECURE_LIB_NAME);
+				}
+			} else {
+				SLog.i(TAG, "-->load lib fail, because context is null:"+AuthAgent.SECURE_LIB_NAME);
+			}
+		} catch (Throwable e) {
+			SLog.e(TAG, "-->load lib error:"+AuthAgent.SECURE_LIB_NAME, e);
+		}
+	}
+
+	/**
+	 * jni中注册的方法
+	 * 
+	 * @param strKey
+	 * @return
+	 */
+	public static native String getPWDKeyToMD5(String strKey);
+	public static native boolean insetTextToArray(int pos, String Text,int len);
+	public static native boolean BackSpaceChar(boolean flag, int pos);
+	public static native boolean clearAllPWD();
+}

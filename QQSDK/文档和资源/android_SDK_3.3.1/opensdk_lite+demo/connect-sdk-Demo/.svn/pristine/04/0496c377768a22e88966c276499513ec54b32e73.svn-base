@@ -1,0 +1,25 @@
+package com.tencent.tauth;
+
+/**
+ * 显示Ui时需要设置的回调接口，用来异步返回腾讯Activity的调用结果。
+ */
+public interface IUiListener {
+    /**
+     * 当UI交互完成时被调用
+     * 
+     * @param response 服务器返回的json结果或者其他结果, response可以是JSONObject或其他类型, 请参考相应API文档
+     */
+    public void onComplete(Object response);
+
+    /**
+     * 当UI发生错误时被调用
+     * @param e
+     */
+    public void onError(UiError e);
+
+    /**
+     * 当用户取消时被调用
+     */
+    public void onCancel();
+
+}

@@ -1,0 +1,34 @@
+package com.tencent.open;
+
+import android.content.Context;
+import android.location.Location;
+
+import com.tencent.map.lbsapi.api.SOSOMapLBSApi;
+
+public class LbsAgent {
+	private static final String SOSO_VERIFY_NAME = "OpenSdk";
+	private static final String SOSO_VERIFY_CODE = "WQMPF-XMH66-ISQXP-OIGMM-BNL7M";
+	
+	private SosoLocationListener sosoListener;
+	
+	public static interface OnGetLocationListener {
+		public void onLocationUpdate(Location location);
+	}
+	
+	public LbsAgent() {
+	}
+
+	public boolean verifyRegCode() {
+		return SOSOMapLBSApi.getInstance().verifyRegCode(SOSO_VERIFY_NAME, SOSO_VERIFY_CODE);
+	}
+	
+	public void requestLocationUpdate(Context ctx, OnGetLocationListener listener) {
+		sosoListener = new SosoLocationListener(listener);
+		SOSOMapLBSApi.getInstance().requestLocationUpdate(ctx, sosoListener);
+	}
+	
+	public void removeUpdate() {
+		SOSOMapLBSApi.getInstance().removeLocationUpdate();
+		sosoListener = null;
+	}
+}

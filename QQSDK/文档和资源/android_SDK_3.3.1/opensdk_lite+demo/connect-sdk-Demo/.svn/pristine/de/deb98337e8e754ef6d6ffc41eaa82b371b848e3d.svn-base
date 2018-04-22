@@ -1,0 +1,335 @@
+/**
+ * Name : FileTracer.java<br>
+ * Copyright : Copyright (c) Tencent Inc. All rights reserved.<br>
+ * Description : Asynchronous File Tracer based on Date & Blocks <br>
+ */
+package com.tencent.open.log;
+
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.Writer;
+
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Message;
+
+/**
+ * 文件日志追踪器 <br>
+ * <br>
+ * 用于实现异步的、后台的文件日志追踪，使用日期 + 序号为量度，提供读取和写入的方法<br>
+ * <br>
+ * <p>
+ * 通过提供{@link FileTracerConfig}对象，可以为{@link FileTracer}实例设置如下选项：<br>
+ * <br>
+ *
+ * <pre>
+ * 工作路径: 设置日志保存的路径，日志文件根据日期保存在该路径的/yyyy-MM-dd/文件夹下，以"1.xxx", "2.xxx"命名<br>
+ * 日志文件扩展名: 用于方便将不同文件日志追踪器实例生成个的日志文件保存在同一个目录下，格式为".xxx"<br>
+ * 线程名称: I/O操作的线程名称<br>
+ * 线程优先级: I/O操作线程的优先级<br>
+ * I/O操作时间阈值: 每隔多长时间进行一次I/O操作<br>
+ * I/O操作数据量阈值: 每当数据量超过多少时，进行一次I/O操作<br>
+ * 日志文件分片数量: 每天的日志文件最多有多少个分片，超过该值将自动删除最旧的分片<br>
+ * 日志文件分片大小: 每个日志分片最大的尺寸，超过该值后将创建并使用新的分片<br>
+ * 日志保存期限: 最长保存日志的时间，若超过该期限，则在{@code FileTracerConfig.cleanWorkRoot()}删除它们<br>
+ * </pre>
+ *
+ *
+ * </p>
+ *
+ *
+ * @author lewistian
+ *
+ */
+public class FileTracer extends Tracer implements Handler.Callback
+{
+    private static final int MSG_FLUSH = 1024;
+
+    private FileTracerConfig config;
+    private FileWriter fileWriter; // 文件的写对象。使用FileWriter而非BufferedWriter的原因是本类已经是二级缓冲I/O操作了
+    private File currTraceFile;
+
+    private char[] charBuffer; // 文件的写缓冲
+
+    private volatile SafeStringQueue bufferA; // 缓冲A
+    private volatile SafeStringQueue bufferB; // 缓冲B
+    private volatile SafeStringQueue writeBuffer; // 写缓冲，用于保存当前其他调用者追踪的日志
+    private volatile SafeStringQueue readBuffer; // 读缓冲，用于交付I/O操作线程写入文件
+
+    private volatile boolean isFlushing = false;
+
+    private HandlerThread thread;
+    private Handler handler;
+
+    /**
+     * 创建一个文件日志追踪器实例，关心级别为{@code TraceLevel.ALL}，初始时启用，并使用默认的日志格式
+     *
+     * @param config
+     *            文件日志追踪器的参数配置 {@link FileTracerConfig}
+     */
+    public FileTracer(FileTracerConfig config)
+    {
+        this(LogConstants.DefFileTraceLevel, true, TraceFormat.DEFAULT, config);
+    }
+
+    /**
+     * 创建一个文件日志追踪器实例
+     *
+     * @param level
+     *            关心的日志级别 参考{@link TraceLevel}
+     * @param enable
+     *            初始时启用/禁用日志追踪
+     * @param format
+     *            日志格式 参考{@link TraceFormat}
+     * @param config
+     *            文件日志追踪器的参数配置 {@link FileTracerConfig}
+     */
+    public FileTracer(int level, boolean enable, TraceFormat format, FileTracerConfig config)
+    {
+        super(level, enable, format);
+
+        // 应用提供的文件日志追踪器配置
+        setConfig(config);
+        // 创建双缓冲安全队列
+        bufferA = new SafeStringQueue();
+        bufferB = new SafeStringQueue();
+        // 初始化写缓冲和读缓冲
+        writeBuffer = bufferA;
+        readBuffer = bufferB;
+        // 初始化I/O操作时的字符缓冲
+        charBuffer = new char[config.getMaxBufferSize()];
+        // 清理过期的日志文件--清理的时限是永久，实际上并没有清除，目前新的日志名称模式也不支持排序和删除，暂时屏蔽此功能。
+//        config.cleanWorkFolders();
+        // 初始化文件操作对象
+        obtainFileWriter();
+        // 创建I/O操作线程
+        thread = new HandlerThread(config.getName(), config.getPriority());
+        // 启动I/O操作线程
+        if (thread != null)
+        {
+            thread.start();
+        }
+        // 创建线程消息句柄
+        if (thread.isAlive() && thread.getLooper() != null)
+        {
+            handler = new Handler(thread.getLooper(), this);
+        }
+
+        // [Deleted by hamlingong] IO操作频率太高
+        // 开始时间阈值监控
+        // prepareNextFlush();
+    }
+
+    /**
+     * 立刻进行一次I/O操作，将缓冲的日志写入文件中
+     */
+    public void flush()
+    {
+        // 如果已经请求写入文件，则移除之前的请求，防止频繁写
+        if (handler.hasMessages(MSG_FLUSH))
+        {
+            handler.removeMessages(MSG_FLUSH);
+        }
+
+        // [Added by hamlingong]: 将此次消息写入IO
+        handler.sendEmptyMessage(MSG_FLUSH);
+    }
+
+    /**
+     * 退出文件日志追踪器<br>
+     * <br>
+     *
+     * p.s.会尽可能的将日志全部写入文件，但调用quit()时其他线程正在写的日志可能会丢失
+     */
+    public void quit()
+    {
+        // 关闭文件写对象
+        closeFileWriter();
+        // 退出I/O操作线程
+        thread.quit();
+    }
+
+    @Override
+    protected void doTrace(int level, Thread thread, long time, String tag, String msg, Throwable tr)
+    {
+        String trace = getTraceFormat().formatTrace(level, thread, time, tag, msg, tr);
+
+        doTrace(trace);
+    }
+
+    @Override
+    protected void doTrace(String formattedTrace)
+    {
+        writeBuffer.addToBuffer(formattedTrace);
+
+        // 检测数据量阈值
+         if (writeBuffer.getBufferSize() >= getConfig().getMaxBufferSize())
+         {
+            flush();
+         }
+    }
+
+    @Override
+    public boolean handleMessage(Message msg)
+    {
+        switch (msg.what)
+        {
+        case MSG_FLUSH:
+        {
+            flushBuffer();
+
+            // [Deleted by hamlingong] flush一次就写一次IO，不要频繁的读写IO
+            // prepareNextFlush();
+            break;
+        }
+        default:
+            break;
+        }
+        return true;
+    }
+
+    /**
+     * 准备下一次I/O操作
+     */
+    // private void prepareNextFlush()
+    // {
+    // if (handler != null) {
+    // handler.sendEmptyMessageDelayed(MSG_FLUSH,
+    // getConfig().getFlushInterval());
+    // }
+    // }
+
+    /**
+     * 将日志全部写入文件
+     */
+    private void flushBuffer()
+    {
+        // 不允许在非文件追踪器线程调用
+        if (Thread.currentThread() != thread)
+        {
+            return;
+        }
+        // 已经正在I/O操作时，不要重入
+        if (isFlushing)
+        {
+            return;
+        }
+        // 标记正在进行I/O操作
+        isFlushing = true;
+        {
+            // 将读写缓冲交换，保证I/O操作时能持续接受新日志
+            swapBuffers();
+            // 将读缓冲写入文件
+            try
+            {
+                readBuffer.writeAndFlush(obtainFileWriter(), charBuffer);
+            }
+            catch (IOException e)
+            {
+
+            }
+            finally
+            {
+                // 读缓冲中的日志都不再可用了（即便失败），立刻清除
+                readBuffer.clear();
+            }
+        }
+        // 标记I/O操作完成
+        isFlushing = false;
+    }
+
+    /**
+     * 获取文件的写对象
+     *
+     * @return Writer实例
+     */
+    private Writer obtainFileWriter()
+    {
+        // 从配置中获得现在应该写入的文件
+        File newFile = getConfig().getCurrFile();
+
+        // 如果是不同于之前的文件，则关闭当前文件的写对象，重新创建
+        if ((newFile != null) && (!newFile.equals(currTraceFile)) || (fileWriter == null && newFile != null))
+        {
+            currTraceFile = newFile;
+
+            closeFileWriter();
+
+            try
+            {
+                fileWriter = new FileWriter(currTraceFile, true);
+            }
+            catch (IOException e)
+            {
+                return null;
+            }
+        }
+
+        return fileWriter;
+    }
+
+    public void setCurrTraceFile(File file){
+    	currTraceFile = file;
+    }
+
+    /**
+     * 关闭文件写对象
+     */
+    private void closeFileWriter()
+    {
+        try
+        {
+            if (fileWriter != null)
+            {
+                fileWriter.flush();
+                fileWriter.close();
+            }
+        }
+        catch (IOException e)
+        {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 交换读写缓存
+     */
+    private void swapBuffers()
+    {
+        synchronized (this)
+        {
+            if (writeBuffer == bufferA)
+            {
+                writeBuffer = bufferB;
+                readBuffer = bufferA;
+            }
+            else
+            {
+                writeBuffer = bufferA;
+                readBuffer = bufferB;
+            }
+        }
+    }
+
+    /**
+     * 获得当前文件日志追踪器的配置
+     *
+     * @return 文件日志追踪器的配置
+     */
+    public FileTracerConfig getConfig()
+    {
+        return config;
+    }
+
+    /**
+     * 设置当前文件日志追踪器的配置
+     *
+     * @param config
+     *            文件日志追踪器的配置
+     */
+    public void setConfig(FileTracerConfig config)
+    {
+        this.config = config;
+    }
+}

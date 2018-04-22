@@ -1,0 +1,142 @@
+package $PACKAGE;
+
+import java.io.IOException;
+import java.util.HashSet;
+import android.app.Activity;
+import android.content.Context;
+import android.provider.Settings;
+import android.util.Log;
+import android.content.BroadcastReceiver;
+import android.content.Intent;
+import android.content.IntentFilter;
+
+public class PreciseLogCat_raven {
+	
+	private static class SingletonHolder{
+		private static final PreciseLogCat_raven INSTANCE = new PreciseLogCat_raven();
+	}
+	private Context mAppContext = null;
+	private HashSet<String> mLogSet = new HashSet<String>();
+	
+	public PreciseLogCat_raven() {
+		
+	}
+	public static final PreciseLogCat_raven instance() {
+		return SingletonHolder.INSTANCE;
+	}
+    private boolean useSystemLog = true;
+	
+	public void log(Object thisobj,String funcName) {
+		if ( mAppContext == null ) {
+			if (thisobj instanceof Activity ) {
+				mAppContext = ((Activity)thisobj).getApplicationContext();
+			}
+		}
+		log(funcName);
+	}
+    private int mFuncNum = 0;
+    private boolean mHasWritenFuncNum = false;
+	private String mFlag = "0";
+    private boolean isAccurateTest = true;
+    private String mLastFlag = "0";
+    private boolean isRegisterReceiver = false;
+    
+	public void log( String funcName ) {
+        long tId = Thread.currentThread().getId();
+        
+		String str = String.format("%s|(%d)", funcName,tId);
+		
+		if ( mAppContext != null ) {
+            String sTemp = Settings.System.getString( mAppContext.getContentResolver(), "raven_logcat_flag");
+			if(isBroadCastSetLogcatFlag)
+			{
+				sTemp = "1";
+			}
+			else
+			{
+				sTemp = sTemp;
+			}
+            if(!isRegisterReceiver){
+           		isRegisterReceiver = true;
+            	ReceiveBroadCast r = new ReceiveBroadCast();
+				IntentFilter filter = new IntentFilter();
+				filter.addAction("com.tencent.sdk_sample.accuratetest");
+				mAppContext.registerReceiver(r, filter);
+            }
+            if (sTemp==null) {
+                mFlag = "0";
+            } else {
+                mFlag = sTemp;
+            }
+            if ( !mLastFlag.equals(mFlag) ) {//标记有变化
+                mLastFlag = mFlag;            
+                if ( isAccurateTest ) {
+                    //精准测试
+                    //判断是否root，对非root手机处理和众包一样
+                    String sRoot = Settings.System.getString( mAppContext.getContentResolver(), "raven_logcat_root");
+					if (isBroadCastSetRoot)
+					{
+						sRoot = "1";
+					}
+                    if ( sRoot != null && sRoot.equals("0") ) {
+                        useSystemLog = false;
+                    }
+                } else {
+                    //众包
+                    //标志变化则打时间戳
+                    useSystemLog = false;
+                }
+            }
+			if ( mFlag.equals("0") ) {
+                if ( mFuncNum != 0 && mAppContext != null ) {
+                	try{
+						Settings.System.putInt( mAppContext.getContentResolver(), "raven_funcnum",0);
+					}catch(SecurityException e){
+						e.printStackTrace();
+					}                   
+                 }
+                mFuncNum = 0;
+                mHasWritenFuncNum = false;
+                //用例结束状态，不录入log直接返回
+				if (! mLogSet.isEmpty()) {
+					synchronized (this) {
+						mLogSet.clear();
+					}
+				}
+				return;
+			}
+		}
+        //当前用例已经录入了函数则直接返回
+		if ( mFlag.equals("0") || mLogSet.contains(str) )return;
+		synchronized (this) {
+			mLogSet.add(str);
+		}
+        //Android Standard
+        if(useSystemLog){
+            android.util.Log.i("ravendiff",str );
+		}
+		else{
+            if ( mAppContext != null && ++mFuncNum >= 50 && mHasWritenFuncNum == false ) 
+            {
+                mHasWritenFuncNum = true;
+                Settings.System.putInt( mAppContext.getContentResolver(), "raven_funcnum",mFuncNum);
+            }
+            //MobileQQ
+            $CUSTOM_LOG;
+        }
+    }
+    boolean isBroadCastSetRoot = false;
+	boolean isBroadCastSetLogcatFlag = false;
+    public class ReceiveBroadCast extends BroadcastReceiver {
+		@Override
+		public void onReceive(Context context, Intent intent) {
+			// 得到广播中得到的数据，并显示出来
+			boolean message = intent
+					.getBooleanExtra("logcat_begin_flag", false);
+			if(!isBroadCastSetRoot){
+				isBroadCastSetRoot = true;			
+				}
+			isBroadCastSetLogcatFlag = message;
+		}
+	}
+}

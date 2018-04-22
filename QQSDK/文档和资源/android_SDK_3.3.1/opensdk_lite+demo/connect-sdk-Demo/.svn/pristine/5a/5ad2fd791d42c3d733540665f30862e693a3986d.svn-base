@@ -1,0 +1,101 @@
+
+package com.tencent.open.widget;
+
+import android.app.Activity;
+import android.content.Context;
+import android.graphics.Rect;
+import android.util.AttributeSet;
+import android.widget.RelativeLayout;
+
+/**
+ * 可以检测软键盘弹出和隐藏的线性布局
+ * 
+ * @author milesxia
+ */
+public class KeyboardDetectorRelativeLayout extends RelativeLayout {
+    private static final String TAG = KeyboardDetectorRelativeLayout.class.getName();
+
+    private Rect rect = null;
+
+    private boolean keyboardIsShowing = false;
+
+    public interface IKeyboardChanged {
+        /**
+         * 软键盘弹出的回调
+         * 
+         * @param remainHeight 除软键盘和顶部状态栏以外，剩余的高度
+         */
+        void onKeyboardShown(int remainHeight);
+
+        void onKeyboardHidden();
+    }
+
+    private IKeyboardChanged mKeyboardListener = null;
+
+    public KeyboardDetectorRelativeLayout(Context context) {
+        super(context);
+        // TODO Auto-generated constructor stub
+        if (rect == null) {
+            rect = new Rect();
+        }
+    }
+
+    public KeyboardDetectorRelativeLayout(Context context, AttributeSet attrs) {
+        super(context, attrs);
+        // TODO Auto-generated constructor stub
+        if (rect == null) {
+            rect = new Rect();
+        }
+    }
+
+    public void addKeyboardStateChangedListener(IKeyboardChanged listener) {
+        mKeyboardListener = listener;
+    }
+
+    @Override
+    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+        // super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        // 系统期望的高度
+        final int proposedheight = MeasureSpec.getSize(heightMeasureSpec);
+
+        Activity activity = (Activity) getContext();
+        // rect是除顶部状态栏和系统软键盘以外，程序窗口所占的高度
+        activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(rect);
+        // 状态栏高度
+        int statusBarHeight = rect.top;
+        // 整个屏幕高度
+        int screenHeight = activity.getWindowManager().getDefaultDisplay().getHeight();
+
+        int diff = (screenHeight - statusBarHeight) - proposedheight;
+        // SLog.e(TAG, "screenHeight=" + screenHeight + "; statusBarHeight=" +
+        // statusBarHeight + "; proposedheight=" + proposedheight + "; diff=" +
+        // diff);
+        if (mKeyboardListener != null && proposedheight != 0) {
+            // 这里假设软键盘高度至少为100以上，diff大于100说明软键盘已弹出
+            if (diff > 100) {
+//                if (!keyboardIsShowing) {
+                    mKeyboardListener.onKeyboardShown(Math.abs(rect.height()) - getPaddingBottom()
+                            - getPaddingTop());
+//                    keyboardIsShowing = true;
+//                }
+            } else {
+//                if (keyboardIsShowing) {
+                    mKeyboardListener.onKeyboardHidden();
+//                    keyboardIsShowing = false;
+//                }
+            }
+        }
+        // super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+
+        // final int actualHeight = getHeight();
+        //
+        // if (actualHeight > proposedheight && mKeyboardListener != null) {
+        // mKeyboardListener.onKeyboardShown(Math.abs(rect.height())-getPaddingBottom()-getPaddingTop());
+        // } else if (actualHeight < proposedheight && mKeyboardListener !=
+        // null) {
+        // mKeyboardListener.onKeyboardHidden();
+        // }
+        super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+    }
+
+}

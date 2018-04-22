@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<project default="javadoc">
+    <target name="javadoc">
+        <javadoc access="public" additionalparam=" -encoding UTF-8 -charset UTF-8" author="false" classpath="D:\Android\android-sdk\tools\support\annotations.jar;libs/android-support-v4.jar" destdir="doc" doctitle="QQ互联SDK文档" nodeprecated="false" nodeprecatedlist="false" noindex="false" nonavbar="false" notree="false" packagenames="com.tencent.tauth" source="1.6" sourcefiles="src/com/tencent/open/NetworkUnavailableException.java,src/com/tencent/open/HttpStatusException.java" sourcepath="gen;src" splitindex="true" use="true" version="true">
+            <link href="file:/D:/Android/android-sdk/docs/reference/"/>
+            <link href="file:/E:/Android/SDK_1.5/doc/"/>
+        </javadoc>
+    </target>
+</project>

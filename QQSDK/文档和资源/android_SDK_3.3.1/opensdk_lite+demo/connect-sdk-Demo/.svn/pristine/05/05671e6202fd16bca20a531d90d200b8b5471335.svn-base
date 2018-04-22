@@ -1,0 +1,75 @@
+package com.tencent.connect;
+
+import android.content.Context;
+import android.os.Bundle;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.tauth.IUiListener;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+
+public class UserInfo extends BaseApi {
+	private static final String GRAPH_SIMPLE_USER_INFO = "user/get_simple_userinfo";
+	private static final String GRAPH_VIP_INFO = "user/get_vip_info";
+	private static final String GRAPH_VIP_RICH_INFO = "user/get_vip_rich_info";
+    private static final String GRAPH_GET_TENPAY_ADDR ="cft_info/get_tenpay_addr";
+    public static final String GRAPH_OPEN_ID = "oauth2.0/m_me";
+    
+	public UserInfo(Context context, QQToken token) {
+		super(token);
+	}
+
+	public UserInfo(Context context, QQAuth qqAuth, QQToken token) {
+		super(qqAuth, token);
+	}
+
+	public void getUserInfo(IUiListener listener) {
+		Bundle params = composeCGIParams();
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_SIMPLE_USER_INFO, 
+				params, Constants.HTTP_GET, requestListener);
+	}
+
+	//下面的注释请勿删除，编译lite版的时候需要删除
+	//[liteexludestart]
+	public void getVipUserInfo(IUiListener listener) {
+		Bundle params = composeCGIParams();
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_VIP_INFO, 
+				params, Constants.HTTP_GET, requestListener);
+	}
+	
+	public void getVipUserRichInfo(IUiListener listener) {
+		Bundle params = composeCGIParams();
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_VIP_RICH_INFO, 
+				params, Constants.HTTP_GET, requestListener);
+	}
+	
+	/**
+	 * 获取财付通用户信息
+	 * @param listener
+	 */
+	public void getTenPayAddr(IUiListener listener) {
+		Bundle params = composeCGIParams();
+		params.putString("ver", "1");//用于接口版本控制。固定填1
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_GET_TENPAY_ADDR, params,
+				Constants.HTTP_GET, requestListener);
+	}
+	//[liteexludeend]
+	
+	/**
+	 * 获取已登录用户的openId
+	 * @param listener
+	 */
+	public void getOpenId(IUiListener listener) {
+		Bundle params = composeCGIParams();
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_OPEN_ID, params,
+				Constants.HTTP_GET, requestListener);
+	}
+}

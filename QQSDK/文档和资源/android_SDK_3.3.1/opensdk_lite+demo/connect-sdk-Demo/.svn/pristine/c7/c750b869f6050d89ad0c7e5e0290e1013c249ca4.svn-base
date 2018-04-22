@@ -1,0 +1,420 @@
+# -*- coding=UTF-8 -*-
+'''
+Created on 2014年1月8日
+
+@author: ravenzhang@Tencent
+'''
+import  re;
+import  javalang;
+
+class State:
+    '''todo: 在去除注释方法中使用的枚举常量，代表当前字符所处的代码状态
+    '''
+    Normal = 0;
+    InString = 1;
+    InLineCommon = 2;
+    InBlockCommon = 3;
+    InFuncion = 4;
+
+class   JavaFile:
+    def __init__(self,filename):
+        if (not filename.endswith(".java")):
+            raise Exception("JavaFile said: '%s' is not a java file!");
+        self.package = "";
+        self.filename = filename;
+        with open(filename) as fl:
+            self.wholeFile = fl.read();
+        
+        #去掉Bom头
+        if (self.wholeFile[0:3] == '\xef\xbb\xbf'):
+            self.wholeFile = self.wholeFile[3:] 
+        
+        #标准化换行符
+        #去掉行尾双分号
+        self.wholeFile = '\n'.join( [ re.sub(';;$', ';', line.rstrip() ) 
+                                     for line in  self.wholeFile.splitlines()] ); 
+
+        codecs = ['utf_8','GBK', 'iso-8859-1']
+        if not isinstance(self.wholeFile, unicode):
+            for codec in codecs:
+                try:
+                    self.wholeFile = self.wholeFile.decode(codec)
+                    break;
+                except UnicodeDecodeError:
+                    pass
+
+        self.__tree__ = javalang.parse.parse( self.wholeFile );
+        if( self.__tree__.package != None ):
+            self.package = self.__tree__.package.name;
+        self.imports = [str(Import.path) for Import in self.__tree__.imports];
+        
+
+    #得到当前路径的字符串名（不包括最后的函数名）
+    def __getPathPreName__(self,path):
+        funcname_pre = "";
+        document_pre = "";
+        for unit in path:
+            unitClassName = unit.__class__.__name__;
+            if ( unitClassName =="CompilationUnit"):
+                funcname_pre += str(unit.package.name);
+            elif ( unitClassName == "ClassDeclaration" ):
+                funcname_pre += "." + "class_" +str(unit.name);
+                if ( unit.documentation ):
+                    document_pre += "class %s:\n%s\n" % (unit.name,unit.documentation);
+            elif ( unitClassName == "InterfaceDeclaration" ):
+                funcname_pre += "." + "inface_" +str(unit.name);
+            elif ( unitClassName == "MethodDeclaration" ):
+                paras = [];
+                for para in unit.parameters:
+                    paras.append(para.type.name);
+                paras = ",".join(paras);
+                funcname_pre += "." + str(unit.name) + "(" + paras + ")";
+            elif (unitClassName == "SwitchStatementCase"):
+                if( len(unit.case)==0 ):
+                    funcname_pre += "." + "default";
+                else:
+                    funcname_pre += "." + str(unit.case[0]);
+            elif ( unitClassName == "MethodInvocation" ):
+                if ( unit.qualifier ):
+                    args = [];
+                    for arg in unit.arguments:
+                        if ( "member" in arg.__dict__.keys()):
+                            args.append(arg.member);
+                    args = ",".join(args);
+                    #限定符可能为空，即非通过"."调用，则只用参数区分
+                    funcname_pre += "." + unit.qualifier;  
+                    funcname_pre += "." + unit.member+ "(" + args + ")";
+                elif ( unit.qualifier == None ):
+                    #print dir(unit);
+                    #print unit.selectors;
+                    pass;
+            elif ( unitClassName == "VariableDeclarator" ):
+                funcname_pre += "." + "$" + str(unit.name);
+            elif ( unitClassName == "ClassCreator" ):
+                pass;
+            elif ( unitClassName == "list" ):
+                pass;
+            elif ( unitClassName == "InterfaceDeclaration" ):
+                funcname_pre += "."+str(unit.name);
+        return funcname_pre,document_pre;
+
+    #查找合适的分号位置
+    def __findProperSemiColon(self,sPara):
+        match = 0;
+        for index,char in enumerate(sPara):
+            if ( char == '(' ):
+                match += 1;
+            elif ( char == ')' ):
+                match -= 1;
+            elif ( char == ';' and match == 0):
+                return index;
+            
+    #根据Javalang返回的路径获取此路径对应的所有函数名
+    def __getPathFuncInfo__(self,funcname_pre,doc_pre,path,type):
+        '''
+               根据Javalang返回的路径获取此路径对应的所有函数名
+        '''
+        funcInfoLst = [];
+        
+        for func in path:
+            if( func.__class__.__name__ == type ):
+                if ( func.body == None ):   # just a interface func
+                    #print func.name;
+                    continue
+                paras = [];
+                for para in func.parameters:
+                    paras.append(para.type.name);
+                paras = ",".join(paras);
+                funcname = str(funcname_pre+"."+func.name+"("+paras+")");
+                funcinfo={};
+                funcinfo["name"] = funcname;
+                funcinfo["startChar"] = "{"
+                funcinfo["startline"] = func.startLine;
+                funcinfo["startpos"] = func.startPos;
+                funcinfo["isStatic"] = 'static' in func.modifiers;
+                funcinfo['annotations'] = func.annotations;
+                
+                funcinfo["isBlank"] = not func.body;
+                if( type == "ConstructorDeclaration" ):
+                    funcinfo["isConstructor"] = True;
+                    ctor_body = self.removeComment(self.wholeFile[func.pos+1:].rstrip('/'));
+                    #if( ctor_body.lstrip().startswith("super") or ctor_body.lstrip().startswith("this(") ):
+                    if( re.match('super\s*\(', ctor_body.lstrip()) or 
+                        re.match('this\s*\(',  ctor_body.lstrip()) ):
+                        pos = self.__findProperSemiColon(ctor_body);
+                        funcinfo["startline"] += ctor_body.count("\n",0,pos);
+                        funcinfo["startpos"] = pos-ctor_body.rfind("\n",0,pos);
+                        funcinfo["startChar"] = ";"    
+                    pass;
+                else:
+                    funcinfo["isConstructor"] = False;
+                        
+                #func.pos是左大括号的位置
+                funcinfo["endline"] = func.endLine;
+                funcinfo["javadoc"] = doc_pre + (func.documentation if func.documentation else "");
+                
+                funcInfoLst.append(funcinfo);
+                
+                #print funcname;
+        return funcInfoLst;
+
+    #提取路径的唯一签名
+    def __pathDigest(self,path):
+        dig = "";
+        pathName,pathDoc = self.__getPathPreName__(path[0:-1]);
+        for func in path[-1]:
+            if(func.__class__.__name__=="MethodDeclaration" or func.__class__.__name__=="ConstructorDeclaration" ):
+                dig += str(func.pos)+","
+        return pathName+dig;
+    
+    def getAllFuncInfoDict(self):
+        '''
+        @todo: 从java文件中提取出有效的函数名
+        @args:
+            None
+        @return:
+             num(int): 函数的个数(理论上数值和下面的列表长度相同，这里额外返回是用作校验)
+             func(list): 函数信息（dict表示）的list
+        '''
+        _shouldNum = 0;
+        pathSet = set();
+        funcInfos = [];
+        for path, node in self.__tree__.filter(javalang.tree.MethodDeclaration ):
+#             print path
+            _shouldNum += 1;
+            pathDig = self.__pathDigest(path)
+            pathName,pathDoc = self.__getPathPreName__(path[0:-1]);
+            if( pathDig not in pathSet ):
+                _funcInfos = self.__getPathFuncInfo__(pathName,pathDoc,path[-1],"MethodDeclaration");
+                pathSet.add(pathDig);
+                funcInfos += _funcInfos;
+            #    pathSet.add(str(path));
+        pathSet = set();
+        for path, node in self.__tree__.filter(javalang.tree.ConstructorDeclaration):
+            _shouldNum += 1;
+            pathDig = self.__pathDigest(path)
+            pathName,pathDoc = self.__getPathPreName__(path[0:-1]);
+            if( pathDig not in pathSet ):
+                _funcInfos = self.__getPathFuncInfo__(pathName,pathDoc,path[-1],"ConstructorDeclaration");
+                pathSet.add(pathDig);
+                funcInfos += _funcInfos;
+                
+    #    输出javalang的所有非重复路径
+    #    for path in pathSet:
+    #        print path;
+    
+        allFuncNames = [ func["name"] for func in funcInfos ];
+        #防止极端情况下的重名
+        for func in funcInfos:
+            _appearance = allFuncNames.count(func["name"]); 
+            if( _appearance > 1 ):
+                index=1;
+                samename = func["name"];
+                for func1 in funcInfos:
+                    if( func1["name"] == samename ):
+                        func1["name"] = samename + "_" + str(index);
+                        index += 1;
+        return _shouldNum,funcInfos;
+
+    def removeComment(self,sourceCode):
+        '''
+        @todo: 字符串状态和注释状态两者不会同时存在，即不可能同时处理注释又处于字符串状态。
+                                    基于以上理论，可以把注释全部先消除，减少后续分析的复杂性！
+        @args:
+            sourceCode(str): 源代码
+        @return:
+            code(str): 把注释和字符串以空格代替后的代码
+        '''
+        curState = State.Normal;
+        result = "";
+        sourceCode = sourceCode.replace(r"\\", "  ");
+        for pos,char in enumerate(sourceCode):
+            #遇到字符串还是原样存储
+            if( char == '"' ):
+                if ( curState == State.Normal ):
+                    curState = State.InString;
+                elif( curState == State.InString and sourceCode[pos-1] != "\\" ):
+                    curState = State.Normal;
+                if( curState == State.InBlockCommon or curState == State.InLineCommon or 
+                    curState == State.InString and sourceCode[pos-1] == "\\"  ):
+                    result += " ";
+                else:
+                    result += char; #这句出现多处是不想把跳出条件的集中处理，那样反而逻辑会复杂
+            #测试是否遇到注释
+            elif( char == "/" ):
+                if( curState == State.Normal and sourceCode[pos+1] == "*" ):
+                    curState = State.InBlockCommon;
+                    result += " "
+                elif( curState == State.Normal and sourceCode[pos+1] == "/" ):
+                    curState = State.InLineCommon;
+                    result += " "
+                elif( curState == State.InBlockCommon and sourceCode[pos-1] == "*" ):
+                    curState = State.Normal;
+                    result += " "
+                elif (curState == State.InLineCommon or curState == State.InString or curState == State.InBlockCommon):
+                    result += " ";
+                else:
+                    result += char;
+            #测试是否关闭行注释
+            elif( char == "\n" or char == "\r"):
+                if( curState == State.InLineCommon ):
+                    curState = State.Normal;
+                result += char;
+            #其它所有普通字符的处理，将字符串和注释置空都是为了消除潜在的解析错误！
+            else:
+                if( curState == State.InBlockCommon or curState == State.InLineCommon or curState == State.InString):
+                    result += " ";
+                else:
+                    result += char;
+        return result;
+    
+    
+#下面这里悲剧的废弃了，但实在是舍不得删呀。。。
+# def  _hasbrother(x):
+#     return x.split("_")[-1].isdigit();
+# 
+# def  __compareFuncName__(x,y):
+#     if( not _hasbrother(x) and _hasbrother(y) ):
+#         return 1;
+#     if( not _hasbrother(y) and _hasbrother(x) ):
+#         return -1;
+#     if( len(x) > len(y) ):
+#         return 1;
+#     elif( len(y) > len(x) ):
+#         return -1;
+#     else:
+#         return 0;
+#     def getAllFuncInfoDict(self):
+#         funcList = self.getAllFuncNames();
+#         fileContent = self.removeComment();
+#         allFuncInfo = [];
+#         for func in funcList:
+#             print func;
+#             funcInfo = {};
+#             funcInfo["name"] = func;
+#             ##print func;
+#             shortName = "";
+#             func = func[len(self.package+"."):];
+#             if ( _hasbrother(func) ):
+#                 func = func[0:func.rfind("_")];
+#                 shortName = func.split("(")[-2].split(".")[-1];
+#             pureBlank="\\s*?"
+#             betweenTypeVar = "[\\W]+?";
+#             crosslineMustBlank = "&+?"  #"`"暂时代表")"，"&"暂时代表"."防止重复替换
+#             crosslineNoBlank = "&*?"
+#             crosslineNoBlankNoSemicolin = "[^\\(;]*?";
+#             func = func.replace("$.","$");
+#             if func.endswith("()"):
+#                 func = func[0:-2] + "@#";
+#             #func = func.replace( "(",crosslineNoBlank+"\\("+crosslineNoBlankNoSemicolin );
+#             func = func.replace( "(", "(\\s*?\\([^\\(]*?`{1}" );
+#             #remove )
+#             if func.endswith(")"):
+#                 func = func[0:-1] + crosslineNoBlankNoSemicolin + "\\`";
+#             func = func.replace(")","([^\\)]*?\)[^\\)]*?`{1}");
+#             #func = func.replace(",",crosslineNoBlank+","+crosslineNoBlank);
+#             func = func.replace(",",betweenTypeVar+"\\w+?"+pureBlank+","+crosslineNoBlank);
+#              
+#             #func = func.replace(".",crosslineMustBlank);
+#             func = func.replace(".",r"((?!\s+?class\s+?).)+?"+crosslineMustBlank);
+#             func = func.replace(r"((?!\s+?class\s+?).)+?"+crosslineMustBlank+"\s+?class\s+?",crosslineMustBlank+r"\s+?class\s+?");
+#              
+#             func = func.replace("@#",pureBlank+"\\("+pureBlank+"\\)");
+#             func = func.replace("`",")");
+#             func = func.replace("$","\\.");
+#         
+#             func = func.replace("&",".");
+#             func +=  "[^;\\(\\)]*?" + "\\{"; # defend the throw XXX
+#             #func +=  "(.*?throw.*?)|(\\s*?)" + "\\{"
+#             print func;
+#             #!!!这两个表达式都可以代表跨行的匹配："aaa(.|\n)+?bbb" 或 "aaa(.*?\n)*?.+?bbb"
+#             pat = re.compile(func,re.M+re.DOTALL);#DOTALL .match\n!
+#             match = pat.search(fileContent);
+#             #print funcInfo["name"];
+#             #print func;
+#             pos = match.end();
+#             ##函数体的起始字符
+#             #pos = fileContent.find("{",pos);
+#             funcInfo["startPos"] = pos;
+#             funcInfo["startLine"] = fileContent.count("\n",0,pos)+1;
+#             pos = _findFuncEndPos(fileContent,pos+1);
+#             funcInfo["endPos"] = pos;        
+#             funcInfo["endline"] = fileContent.count("\n",0,pos)+1;  
+#             if ( shortName != "" ):
+#                 shortNameStart = fileContent.rfind(shortName,0,pos);
+#                 fileContent = fileContent[0:shortNameStart] + " "*len(shortName)+ fileContent[shortNameStart+len(shortName):];
+#             allFuncInfo.append(funcInfo);
+#         allFuncInfo.sort(key=lambda x : x["startPos"]);
+#         return allFuncInfo;
+#          
+def walkTest(  a = "):" ):a=9
+
+def walkTest(  a = "):" ):
+    import  os;
+    import time
+    tm = time.time();
+    for root,dirs,files in os.walk(r"D:\TencentSVN\B2\AndroidQQ_4.7_OpenSdk\QQLite"):
+        for f in files:
+            filename = os.path.join(root,f);
+            if (not filename.endswith(".java")):continue;
+            print filename;
+            javaFile = JavaFile(filename);
+            num,allFuncInfo = javaFile.getAllFuncInfoDict();
+            print num;
+    print time.time()-tm            
+    print "done!"
+
+def lstTest():
+    testFiles = [
+                 #r"E:\temp\com\com\tencent\open\agent\AuthorityActivity.java",
+                 #r"C:\Users\Administrator\Desktop\MainActivity.java",
+                 #r"E:\temp\com\com\tencent\open\agent\Login.java",
+                 #r"E:\temp\com\com\tencent\open\adapter\OpenAppClient.java",
+                 #r"E:\temp\com\com\tencent\open\appcommon\AppClient.java"
+                 #r"E:\temp\com\com\tencent\open\adapter\CommonDataAdapter.java",
+                 #r"E:\temp\com\com\tencent\open\appcommon\js\AppInterface.java",
+                 #r"F:\Android\WorkSpace\FindJavaFunc\test.java",
+                 #r"E:\temp\LiteActivity_old.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_OpenSdk\QQLite\opensdk\com\tencent\open\base\StringAddition.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_OpenSdk\QQLite\qbiz\com\tencent\biz\pubaccount\PublicAccountBrowser.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_OpenSdk\QQLite\qzone\com\qzone\preview\QzonePictureViewer.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_OpenSdk\QQLite\autotest_inst\QQLiteTest\src\com\tencent\mobileqq\test\FriendInfoTest.java",
+                 #r"E:\temp\com\com\tencent\open\downloadnew\MyAppApi.java",
+                 #r"E:\temp\com\com\tencent\open\appcommon\js\OpenJsBridge.java",
+                 #r"E:\temp\com\com\tencent\open\agent\AuthorityActivity.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_Trunk\QQLite\opensdk\com\tencent\open\widget\KeyboardDetectorRelativeLayout.java",
+                 #无super的构造函数。。
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_Trunk\QQLite\opensdk\com\tencent\open\component\cache\CacheManager.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\qzone\com\qzone\common\activities\QzoneAdaptVideoActivity.java",
+                 #r"D:\TencentSVN\B2\AndroidQQ_4.7_OpenSdk\QQLite\autotest_inst\QQLiteTest\src\com\tencent\mobileqq\test\util\LaunchWithClearEnv.java",
+                 #r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\dataline\com\tencent\mobileqq\app\DataLineHandler.java',
+                 #r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\src\com\tencent\mobileqq\util\InfiniteTaskThreadPool.java',
+                 #r'E:\temp\SecSvcObserver.java',
+                 #r'E:\temp\QzoneTroopAlbumViewPhotoActivity.java',
+                 #r'C:\Users\ravenzhang\Documents\RTXC File List\C_Users_ravenzhang_AppData_Local_Tencent_RTXLite_Application\Accounts\ravenzhang\RTXDownload\WiFiExtraTimeReportManager.java',
+                 #r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\ReaderZone\ReaderZonePlugin\src\com\qqreader\common\readertask\ordinal\ReaderProtocolTask.java',
+                 #r'E:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\src\com\tencent\mobileqq\activity\TroopPrivateSettingActivity.java',
+                 #2015年2月16日javalang提示语法错误
+                 #r'E:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\src\com\tencent\common\app\AppInterfaceFactory.java',
+                 #r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\Mqq\test\com\tencent\mqq\OthreProcessDemo.java',
+                 #r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\cooperation\cooperation\qwallet\open\PayApi.java',
+                 #r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\src\com\tencent\mobileqq\troop\activity\AudioRecordActivity.java',
+                 
+                 #r'E:\Tencent_svn\Android_Qzone\plugin_maxvideo\src\com\tencent\maxvideo\activity\TrimVideoActivity.java',
+                 #r'E:\TencentSVN\B2\course_branch\course\proto_pb\com\tencent\pbrecommandcourselist\pbrecommandcourselist.java',
+                 r'E:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\qqhotspot\com\qqhotspot\base\QQHotSpotAppInterface.java',
+                 ];
+    for test in testFiles:
+        import time
+        tm = time.time();
+        javaFile = JavaFile(test);
+        print time.time()-tm
+        num,allFuncInfo = javaFile.getAllFuncInfoDict();
+        print num,len(allFuncInfo);
+        for func in allFuncInfo:
+            print func;
+            #print func['name'],func['startline'];
+        
+if __name__ == "__main__":
+    lstTest();
+    #walkTest();

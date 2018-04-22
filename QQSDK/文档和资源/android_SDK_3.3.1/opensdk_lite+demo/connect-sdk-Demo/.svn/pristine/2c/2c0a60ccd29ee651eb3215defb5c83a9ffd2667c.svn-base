@@ -1,0 +1,362 @@
+package com.tencent.connect.auth;
+
+import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.support.v4.app.Fragment;
+import android.text.TextUtils;
+import android.webkit.CookieSyncManager;
+import android.widget.Toast;
+
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.ApkExternalInfoTool;
+import com.tencent.open.utils.Global;
+import com.tencent.tauth.AuthActivity;
+import com.tencent.tauth.IUiListener;
+
+import java.io.File;
+import java.util.List;
+
+public class QQAuth {
+	private static final String TAG = SLog.TAG + ".QQAuth";
+	private AuthAgent mAuthAgent;
+	private QQToken mQQToken;
+
+    /**
+     * 构造函数<br>
+     * <br>
+     *
+     * @param appId 应用的appId
+     */
+	private QQAuth(String appId, Context ctx) {
+        SLog.i(TAG, "new QQAuth() --start");
+        mQQToken = new QQToken(appId);
+        mAuthAgent = new AuthAgent(mQQToken);
+        TencentStat.start4QQConnect(ctx, mQQToken);
+        SLog.i(TAG, "new QQAuth() --end");
+    }
+
+    /**
+     * 创建Tencent实例 <br>
+     * 调用该方法时, 须确保AndroidManifest.xml中添加了{@link AuthActivity}的配置, 否则将输错错误日志,
+     * 并返回null
+     *
+     * @param appId
+     * @param ctx 程序的上下文, 可简单传入 getApplicationContext()
+     * @return Tencent实例, 或者 null
+     */
+    public static QQAuth createInstance(String appId, Context ctx) {
+        Global.setContext(ctx.getApplicationContext());
+        SLog.i(TAG, "QQAuth -- createInstance() --start");
+        try {
+            PackageManager packageManager = ctx.getPackageManager();
+            ComponentName componentName = new ComponentName(ctx.getPackageName(),
+                    "com.tencent.tauth.AuthActivity");
+            // 如果开发者没配置 com.tencent.tauth.AuthActivity , getActivityInfo 就会出异常
+            packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA
+                    & PackageManager.GET_INTENT_FILTERS);
+            componentName = new ComponentName(ctx.getPackageName(),
+                    "com.tencent.connect.common.AssistActivity");
+            packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA
+                    & PackageManager.GET_INTENT_FILTERS);
+        } catch (NameNotFoundException e) {
+            SLog.e(TAG, "createInstance() error --end", e);
+            // notify caller, make sure this happened on develop phrase.
+            Toast.makeText(ctx.getApplicationContext(), "请参照文档在Androidmanifest.xml加上AuthActivity和AssitActivity的定义 ",
+            		Toast.LENGTH_LONG).show();
+            return null;
+        }
+
+        QQAuth qqAuth = new QQAuth(appId, ctx);
+
+        SLog.i(TAG, "QQAuth -- createInstance()  --end");
+        return qqAuth;
+    }
+
+    /**
+     * 登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_token,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动腾讯Activity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param activity 调用者Activity。
+     * @param scope 应用所需要的所有权限，由“,”分隔
+     * @param listener 回调接口
+     * @return <li> {@link Constants#UI_ACTIVITY}表示启动了腾讯的Activity来完成交互。</li> <li>
+     *         {@link Constants#UI_DIALOG}表示启动了对话框来完成交互。</li>
+     */
+    public int login(Activity activity, String scope, IUiListener listener) {
+        SLog.i(TAG, "login()");
+        return login(activity, scope, listener, "");
+    }
+
+    /**
+     * 登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_token,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动腾讯Activity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param activity 调用者Activity。
+     * @param scope 应用所需要的所有权限，由“,”分隔
+     * @param listener 回调接口
+     * @param businessId 开发商业务id
+     * @return <li> {@link Constants#UI_ACTIVITY}表示启动了腾讯的Activity来完成交互。</li> <li>
+     *         {@link Constants#UI_DIALOG}表示启动了对话框来完成交互。</li>
+     */
+    public int login(Activity activity, String scope, IUiListener listener, String businessId) {
+        SLog.i(TAG, "-->login activity: " + activity);
+    	return login(activity, null, scope, listener, businessId);
+    }
+
+    /**
+     * 登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_token,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动腾讯Activity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param fragment 调用者fragment。
+     * @param scope 应用所需要的所有权限，由“,”分隔
+     * @param listener 回调接口
+     * @param businessId 开发商业务id
+     * @param fragment
+     * @return <li> {@link Constants#UI_ACTIVITY}表示启动了腾讯的Activity来完成交互。</li> <li>
+     *         {@link Constants#UI_DIALOG}表示启动了对话框来完成交互。</li>
+     */
+    public int login(Fragment fragment, String scope, IUiListener listener, String businessId) {
+        Activity activity = fragment.getActivity();
+        SLog.i(TAG, "-->login activity: " + activity);
+        return login(activity, fragment, scope, listener, businessId);
+    }
+
+    /**
+     * 用于兼容activity和fragment不同的调用来源, 进行onActivityResult的需求.
+     * @param activity
+     * @param fragment
+     * @param scope
+     * @param listener
+     * @param businessId
+     * @return
+     */
+    private int login(Activity activity, Fragment fragment, String scope, IUiListener listener, String businessId) {
+        String pkgName = activity.getApplicationContext().getPackageName();
+        PackageManager pm = activity.getPackageManager();
+        try {
+            String apkPath = null;
+            List<ApplicationInfo> ais = pm.getInstalledApplications(PackageManager.GET_META_DATA);
+            for (ApplicationInfo info : ais) {
+                if (pkgName.equals(info.packageName)) {
+                    apkPath = info.sourceDir;
+                    break;
+                }
+            }
+            if (apkPath != null) {
+                String channelId = ApkExternalInfoTool.readChannelId(new File(apkPath));
+                if (!TextUtils.isEmpty(channelId)) {
+                    SLog.v(TAG, "-->login channelId: " + channelId);
+                    return loginWithOEM(activity, scope, listener, channelId, channelId, "");
+                }
+            }
+        } catch (Throwable e) {
+            SLog.e(TAG, "-->login get channel id exception.", e);
+            e.printStackTrace();
+        }
+        SLog.d(TAG, "-->login channelId is null ");
+
+        BaseApi.isOEM=false;
+        return mAuthAgent.doLogin(activity, scope, listener, false, fragment);
+    }
+
+    /**
+     * 此接口单独开给【Oem应用市场分渠道计费参数需求】
+     * 比login接口多了三个字段： 注册渠道 、安装渠道、业务ID。必填参数，如果为空可以传 null 或者""
+     * @param activity
+     * @param scope
+     * @param listener
+     * @param registerChannel
+     * @param installChannel
+     * @param businessId
+     * @return
+     */
+    @Deprecated
+    public int loginWithOEM(Activity activity, String scope, IUiListener listener,
+            String registerChannel, String installChannel, String businessId){
+        SLog.i(TAG, "loginWithOEM");
+    	BaseApi.isOEM=true;
+    	//后台定义如果传入为空 默认客户端上传null 如果他传入null拼接字符串让他直接转为"null"
+    	if(registerChannel.equals("")){
+    		registerChannel="null";
+    	}
+    	if(installChannel.equals("")){
+    		installChannel="null";
+    	}
+    	if(businessId.equals("")){
+    		businessId="null";
+    	}
+    	BaseApi.installChannel=installChannel;
+    	BaseApi.registerChannel=registerChannel;
+    	BaseApi.businessId=businessId;
+    	return mAuthAgent.doLogin(activity, scope, listener);
+    }
+
+
+    /**
+     * 增量授权，重新走一遍授权流程<br>
+     * <br>
+     * 启动一个交互界面，完成用户增量授权的交互流程，通过回调返回授权的access_token,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动腾讯Activity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param activity 调用者Activity。
+     * @param scope 应用所需要的所有权限，由“,”分隔
+     * @param listener 回调接口
+     * @return <li> {@link Constants#UI_ACTIVITY}表示启动了腾讯的Activity来完成交互。</li> <li>
+     *         {@link Constants#UI_DIALOG}表示启动了对话框来完成交互。</li>
+     */
+    public int reAuth(Activity activity, String scope, IUiListener listener) {
+        SLog.i(TAG, "reAuth()");
+        return mAuthAgent.doLogin(activity, scope, listener, true, null);
+    }
+
+    /**
+     * 校验token并统计DAU
+     */
+    public void reportDAU() {
+        mAuthAgent.reportDAU(null);
+    }
+
+    /**
+     * 校验token
+     *
+     * @param IUiListener
+     */
+    public void checkLogin(IUiListener listener) {
+    	mAuthAgent.checkLogin(listener);
+    }
+
+    /**
+     * 登出<br>
+     * <br>
+     * 清除WebView的登录态，清除SDK中保存的access_token、expires_in和openId
+     *
+     * @param ctx 调用者Context
+     */
+    public void logout(Context ctx) {
+        SLog.i(TAG, "logout() --start");
+        CookieSyncManager.createInstance(ctx);
+
+        // delete by toddzhao, for:注销只是针对第三方应用，wtlogin并没有注销
+        // CookieManager.getInstance().removeAllCookie();
+
+        setAccessToken(null, null);
+        setOpenId(ctx, null);
+        SLog.i(TAG, "logout() --end");
+    }
+
+    public QQToken getQQToken() {
+    	return mQQToken;
+    }
+    /**
+     * 从外部设置access_token、expires_in。<br>
+     * <br>
+     * SDK在此不检验此参数的有效性，应用应保证参数为
+     * {@link Tencent#login(Activity, String, IUiListener)} 的返回结果。否则之后的调用可能出错。 <br>
+     * <br>
+     * 建议按如下方式使用该接口: <li>1. login成功后, 把获取到的 expires_in 跟当前时间相加之后保存, <br>
+     * 如: real_expires_in = System.currentTimeMillis() +
+     * Long.parseLong(expires_in) * 1000; <li>2. 在需要调用该接口时, 再把real_expires_in
+     * 换算成 expires_in, <br>
+     * 如: expires_in = (real_expires_in - System.currentTimeMillis()) / 1000 +
+     * ""; <li>3. 之后把保存的 access_token 和计算出来的 expires_in 传给 setAccessToken 即可
+     *
+     * @param token
+     * @param expiresIn
+     */
+    public void setAccessToken(String token, String validTimeInSecond) {
+        SLog.v(TAG, "setAccessToken(), validTimeInSecond = " + validTimeInSecond + "");
+        mQQToken.setAccessToken(token, validTimeInSecond);
+    }
+
+    /**
+     * 判断 access_token 是否有效
+     *
+     * @return access_token 有效则返回true, 否则返回false
+     */
+
+    public boolean isSessionValid() {
+        SLog.v(TAG,
+                "isSessionValid(), result = " + (mQQToken.isSessionValid() ? "true" : "false")
+                        + "");
+        return mQQToken.isSessionValid();
+    }
+    /**
+     * 从外部设置openId。<br>
+     * <br>
+     * SDK不检验外部传入的参数的有效性，应用应保证此值为{@link Constants#GRAPH_OPEN_ID}
+     * 的返回结果，否则之后的调用可能出错。<br>
+     *
+     * @param openId
+     */
+    public void setOpenId(Context context, String openId) {
+        SLog.v(TAG, "setOpenId() --start");
+        mQQToken.setOpenId(openId);
+        TencentStat.reportQQ(context, mQQToken);
+        SLog.v(TAG, "setOpenId() --end");
+    }
+
+    /**
+     * 获取执行腾讯Activity（如：story打开的Activity）的结果的回调接口。<br>
+     * <br>
+     * <b>注意<br>
+     * <li>调用可能打开腾讯的Activity的接口（如：{@link #story}、{@link #invite}、
+     * {@link #setAvatar}等）， 需要重载{@link Activity#onActivityResult}，在其中调用本函数，否则，
+     * 您传给该接口的回调（{@link IUiListener}）有可能不被调用。 <br>
+     * <br><li>SDK 使用 {@link Constants#CODE_REQUEST_MIN}、
+     * {@link Constants#CODE_REQUEST_MAX} 之间的值来作为
+     * {@link Activity#startActivityForResult(Intent, int)}
+     * 的requestCode，应用不可复用此区间内的值。</b>
+     *
+     * @param requestCode
+     * @see {@link Activity#onActivityResult}
+     * @param resultCode
+     * @see {@link Activity#onActivityResult}
+     * @param data
+     * @see {@link Activity#onActivityResult}
+     * @return ActivityResult是否已被SDK截获并消耗。
+     */
+    public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
+        SLog.i(TAG, "onActivityResult() ,resultCode = " + resultCode
+                + "");
+        //mAuthAgent.onActivityResult(requestCode, resultCode, data);
+        return true;
+    }
+}

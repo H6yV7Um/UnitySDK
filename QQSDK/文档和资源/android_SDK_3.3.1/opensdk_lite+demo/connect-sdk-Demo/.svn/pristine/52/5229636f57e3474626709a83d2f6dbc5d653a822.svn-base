@@ -1,0 +1,210 @@
+package com.tencent.open.utils;
+
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
+import java.net.URL;
+
+
+import com.tencent.open.log.SLog;
+
+import android.app.Activity;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Environment;
+import android.os.Handler;
+import android.os.Message;
+
+/**
+ * 异步拉取图片
+ * @author yukinzhang
+ *
+ */
+public class AsynLoadImg {
+	 private String imgUrl;
+	 private AsynLoadImgBack saveCallBack; 
+	 private final static String TAG = "AsynLoadImg";
+	
+	
+	 private  static String ALBUM_PATH;    //保存路径
+	 
+	 private long startTime;
+	 
+	 private Handler messageHandler;//handle
+	 
+	 /**
+	  * 兼容主线程和子线程调用。必须初始化looper
+	  * @param activity
+	  */
+	 public AsynLoadImg(Activity activity){		 
+		 messageHandler = new Handler(activity.getMainLooper()) {   
+		        @Override  
+		        public void handleMessage(Message msg) { 
+		        	SLog.v(TAG, "handleMessage:" + msg.arg1);
+		        	if (msg.arg1 == 0){
+		        		saveCallBack.saved(msg.arg1,(String)msg.obj);  
+		        	}else{
+		        		saveCallBack.saved(msg.arg1,null);  
+		        	}
+		        	
+		        }   
+		    };  
+	 }
+	 
+	 
+	 public void save(String imgUrl, AsynLoadImgBack saveBack) { 
+		 SLog.v(TAG, "--save---");
+		 if (imgUrl == null || imgUrl.equals("")){    		
+			 saveBack.saved(1,null);
+			 return;
+	     } 
+		 if (!Util.hasSDCard()){
+			 saveBack.saved(2,null);
+			 return;
+		 }
+		 ALBUM_PATH = Environment.getExternalStorageDirectory() + "/tmp/"; //保存目录
+		 
+		 startTime = System.currentTimeMillis();
+		 
+		 this.imgUrl = imgUrl;
+		 saveCallBack = saveBack; 
+		 new Thread(saveFileRunnable).start();   
+	 }
+	 
+	 /**  
+     * 保存文件   Bitmap bm, String fName, AsynImageSaveBack saveBack
+     * @param bm  
+     * @param fileName  
+     * @throws IOException  
+     */  
+    public boolean saveFile(Bitmap bitmap,  String fileName){  
+    	String path = ALBUM_PATH;
+    	BufferedOutputStream bos = null;
+    	try{
+	        File dirFile = new File(path);   
+	        if(!dirFile.exists()){   
+	            dirFile.mkdir();   
+	        }   
+	        String realName = path + fileName;
+	        SLog.v(TAG, "saveFile:"+fileName);
+	        File myCaptureFile = new File(realName);   
+	        bos = new BufferedOutputStream(new FileOutputStream(myCaptureFile));   
+	        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, bos);   
+	        bos.flush();	        
+    	}catch(IOException e){
+    		e.printStackTrace();
+    		SLog.e(TAG, "saveFile bmp fail---",e);
+    		return false;
+    	} finally {
+    		if (bos != null) {
+    			try {
+					bos.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+    			bos = null;
+    		}
+    	}
+        return true;
+    }   
+       
+    /** 
+     * 根据一个网络连接(String)获取bitmap图像 
+     *  
+     * @param imageUri 
+     * @return 
+     * @throws MalformedURLException 
+     */  
+    public static Bitmap getbitmap(String imageUri) {  
+    	SLog.v(TAG, "getbitmap:"+imageUri);
+        // 显示网络上的图片  
+        Bitmap bitmap = null;  
+        try {  
+            URL myFileUrl = new URL(imageUri);  
+            HttpURLConnection conn = (HttpURLConnection) myFileUrl  
+                    .openConnection();  
+            conn.setDoInput(true);  
+            conn.connect();  
+            InputStream is = conn.getInputStream();  
+            bitmap = BitmapFactory.decodeStream(is);  
+            is.close();  
+  
+            SLog.v(TAG, "image download finished." + imageUri);
+        }catch (OutOfMemoryError e) {
+            e.printStackTrace();
+            SLog.v(TAG, "getbitmap bmp fail---");
+            return null;
+        } catch (IOException e) {  
+            e.printStackTrace();  
+            SLog.v(TAG, "getbitmap bmp fail---");
+            return null;
+        }  
+        return bitmap;
+    }
+    private Runnable saveFileRunnable = new Runnable(){   
+        @Override  
+        public void run() { 
+        	SLog.v(TAG, "saveFileRunnable:");
+        	String md5Name = Util.encrypt(imgUrl);
+        	String fileName = "share_qq_" + md5Name + ".jpg";
+	        String realName = ALBUM_PATH + fileName;
+	        
+	        File file = new File(realName);
+	        
+	        Message msg = messageHandler.obtainMessage();
+            if(file.exists()){
+            	msg.arg1 = 0;   
+            	msg.obj = realName;
+            	SLog.v(TAG,"file exists: time:"+ (System.currentTimeMillis() - startTime));
+            }else{
+            	boolean flag = false;
+            	Bitmap bmp = getbitmap(imgUrl);
+            	if (bmp != null){
+            		flag = saveFile(bmp, fileName);
+            	}else{
+            		SLog.v(TAG, "saveFileRunnable:get bmp fail---");
+            	}
+            	if (flag){
+            		msg.arg1 = 0;   
+                	msg.obj = realName;
+            	}else{
+            		msg.arg1 = 1;
+            	}
+            	SLog.v(TAG,"file not exists: download time:"+ (System.currentTimeMillis() - startTime));
+            }
+        	 
+        	/*
+            try {   
+            	//realName = saveFile();   
+            	msg.arg1 = 0;   
+            	msg.obj = realName;
+            } catch (IOException e) {   
+            	msg.arg1 = 1;   
+                e.printStackTrace();   
+            }          
+			 */
+            messageHandler.sendMessage(msg);   
+        }   
+               
+    };   
+    /**
+     *    放在构造函数里面实现
+     
+    private Handler messageHandler = new Handler() {   
+        @Override  
+        public void handleMessage(Message msg) { 
+        	SLog.v(TAG, "handleMessage:" + msg.arg1);
+        	if (msg.arg1 == 0){
+        		saveCallBack.saved(msg.arg1,(String)msg.obj);  
+        	}else{
+        		saveCallBack.saved(msg.arg1,null);  
+        	}
+        	
+        }   
+    };  
+    */
+}

@@ -1,0 +1,41 @@
+package com.tencent.open.widget;
+
+import java.lang.reflect.Method;
+
+import android.content.Context;
+import android.util.AttributeSet;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+
+public class OpenWebView extends WebView {
+
+	public OpenWebView(Context context) {
+		super(context);
+	}
+
+	public OpenWebView(Context context, AttributeSet attrs, int defStyle) {
+		super(context, attrs, defStyle);
+	}
+
+	public OpenWebView(Context context, AttributeSet attrs) {
+		super(context, attrs);
+	}
+
+	@Override
+	protected void onAttachedToWindow() {
+		super.onAttachedToWindow();
+        WebSettings settings = getSettings();
+        if (null == settings) {
+            return;
+        }
+        Class<?> clazz = settings.getClass();
+        try {
+            Method method = clazz.getMethod("removeJavascriptInterface",
+                        String.class);
+            if (method != null)
+                method.invoke(this, "searchBoxJavaBridge_");
+        } catch (Exception e) {
+        }
+	}
+
+}

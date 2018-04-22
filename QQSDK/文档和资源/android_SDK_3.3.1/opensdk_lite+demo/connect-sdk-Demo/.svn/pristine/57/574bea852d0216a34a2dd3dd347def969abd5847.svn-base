@@ -1,0 +1,20 @@
+package com.tencent.open.utils;
+
+import java.util.ArrayList;
+ 
+/**
+ * 异步保存图片到本地，返回保存的路径
+ * @author yukinzhang
+ *
+ */
+public interface AsynLoadImgBack {
+    
+    public static final int LOAD_IMAGE_COMPLETED = 0; // 上传或者下载完成, 没有出错.返回有正常的url或者路径
+    public static final int LOAD_IMAGE_PATH_NULL = 1; // 路径为null
+    public static final int LOAD_IMAGE_NO_SDCARD = 2; // 没有sdcard
+    public static final int LOAD_IMAGE_IMAGE_FORMAT_ERROR = 3; // 图片格式错误, 导致decode出来的图片为null
+    
+    void saved(int code, String path);
+
+    void batchSaved(int code, ArrayList<String> paths);
+}

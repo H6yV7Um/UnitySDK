@@ -1,0 +1,816 @@
+package com.tencent.connect.auth;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.lang.ref.WeakReference;
+import java.net.URLDecoder;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.app.Activity;
+import android.app.Dialog;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.DialogInterface.OnCancelListener;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.NinePatch;
+import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.NinePatchDrawable;
+import android.graphics.drawable.PaintDrawable;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.SystemClock;
+import android.support.v4.app.Fragment;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.view.Gravity;
+import android.view.View;
+import android.view.Window;
+import android.view.WindowManager;
+import android.view.View.OnClickListener;
+import android.webkit.CookieSyncManager;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.RelativeLayout.LayoutParams;
+import android.widget.ImageView;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.open.TDialog;
+import com.tencent.open.utils.OpenConfig;
+import com.tencent.open.web.security.JniInterface;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.ThreadManager;
+import com.tencent.open.utils.Util;
+
+public class AuthAgent extends BaseApi{
+	private static final String TAG = SLog.TAG + ".AuthAgent";
+    /**
+     * 默认pf值，后台没有下发pf时使用此默认值
+     */
+	private static final String DEFAULT_PF = "openmobile_android";
+    private static final String ACTION_LOGIN = "action_login";
+
+    //安全so库的版本号，有升级请对版本号+1
+    private static final int SECURE_LIB_VERSION = 3;
+    public static final String SECURE_LIB_X86_FILE_NAME = "libwbsafeedit_x86";
+    public static final String SECURE_LIB_X86_64_FILE_NAME = "libwbsafeedit_x86_64";
+    public static final String SECURE_LIB_ARM_FILE_NAME = "libwbsafeedit";
+    public static final String SECURE_LIB_ARM64_FILE_NAME = "libwbsafeedit_64";
+    public static String SECURE_LIB_FILE_NAME = "libwbsafeedit";
+    public static String SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+
+    static {
+        /*if (SystemUtils.isX86Architecture()) {
+            SECURE_LIB_FILE_NAME = SECURE_LIB_X86_FILE_NAME;
+            SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+            SLog.i(TAG, "is x86 architecture");
+        } else {
+            SECURE_LIB_FILE_NAME = SECURE_LIB_ARM_FILE_NAME;
+            SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+            SLog.i(TAG, "is not x86(default arm) architecture");
+        }*/
+        String abi = Build.CPU_ABI;
+        if(abi != null && !abi.equals("")){
+        	if(abi.equalsIgnoreCase("arm64-v8a")){
+        		SECURE_LIB_FILE_NAME = SECURE_LIB_ARM64_FILE_NAME;
+                SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+                SLog.i(TAG, "is arm64-v8a architecture");
+        	} else if(abi.equalsIgnoreCase("x86")){
+        		SECURE_LIB_FILE_NAME = SECURE_LIB_X86_FILE_NAME;
+                SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+                SLog.i(TAG, "is x86 architecture");
+        	} else if(abi.equalsIgnoreCase("x86_64")){
+        		SECURE_LIB_FILE_NAME = SECURE_LIB_X86_64_FILE_NAME;
+                SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+                SLog.i(TAG, "is x86_64 architecture");
+        	} else {
+        		SECURE_LIB_FILE_NAME = SECURE_LIB_ARM_FILE_NAME;
+                SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+                SLog.i(TAG, "is arm(default) architecture");
+        	}
+        } else {
+        	SECURE_LIB_FILE_NAME = SECURE_LIB_ARM_FILE_NAME;
+            SECURE_LIB_NAME = SECURE_LIB_FILE_NAME + ".so";
+            SLog.i(TAG, "is arm(default) architecture");
+        }
+    }
+
+	private IUiListener mListener;
+	private String mScope;
+	private WeakReference<Activity> mActivity;//防止内存泄漏 by maxwellwli.
+
+	public AuthAgent(QQToken token) {
+		super(token);
+	}
+
+	private class TokenListener implements IUiListener {
+
+        private final IUiListener mListener;
+
+        private final boolean mNeedSync;
+        private final Context mContext;
+
+        public TokenListener(Context context, IUiListener l, boolean needSync,
+                boolean needCompare) {
+        	mContext = context;
+            mListener = l;
+            mNeedSync = needSync;
+            SLog.d(TAG, "OpenUi, TokenListener()");
+        }
+
+        @Override
+        public void onComplete(Object response) {
+            SLog.d(TAG, "OpenUi, TokenListener() onComplete");
+            JSONObject obj = (JSONObject)response;
+            try {
+                String token = obj.getString(Constants.PARAM_ACCESS_TOKEN);
+                String expires = obj.getString(Constants.PARAM_EXPIRES_IN);
+                String openId = obj.getString(Constants.PARAM_OPEN_ID);
+                if (token != null && mToken != null && openId != null) {
+                    /*
+                     * NOTE:delete by toddzhao 2012-12-06
+                     * NOTE:需求确认结果：普通登录、支付登录，登录态都覆盖，不保留。 if (!mNeedCompare ||
+                     * openId.equals(mTencent.getOpenId())) {
+                     */
+                    {
+                    	mToken.setAccessToken(token, expires);
+                    	mToken.setOpenId(openId);
+                        TencentStat.reportQQ(mContext, mToken);
+                    }
+                }
+
+                // 将后台下发的pf字段缓存本地，下次发cgi请求时附带上此字段
+                String pf = obj.getString(Constants.PARAM_PLATFORM_ID);
+                if (pf != null) {
+                    try {
+                        SharedPreferences pfinfo = mContext.getSharedPreferences(
+                                Constants.PREFERENCE_PF, Context.MODE_PRIVATE);
+                        pfinfo.edit().putString(Constants.PARAM_PLATFORM_ID, pf).commit();
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                        SLog.e(TAG, "OpenUi, TokenListener() onComplete error", e);
+                    }
+                }
+
+                if (mNeedSync) {
+                    CookieSyncManager.getInstance().sync();
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
+                SLog.e(TAG, "OpenUi, TokenListener() onComplete error", e);
+            }
+            mListener.onComplete(obj);
+            releaseResource();
+            SLog.release();
+        }
+
+        @Override
+        public void onError(UiError e) {
+            SLog.d(TAG, "OpenUi, TokenListener() onError");
+            mListener.onError(e);
+            SLog.release();
+        }
+
+        @Override
+        public void onCancel() {
+            SLog.d(TAG, "OpenUi, TokenListener() onCancel");
+            mListener.onCancel();
+            SLog.release();
+        }
+    }
+
+	public int doLogin(Activity activity, String scope, IUiListener listener) {
+        return doLogin(activity, scope, listener, false, null);
+	}
+
+    public int doLogin(Activity activity, String scope, IUiListener listener, boolean isAddRight, Fragment fragment) {
+		mScope = scope;
+		mActivity = new WeakReference<Activity>(activity);;
+		mListener = listener;
+
+		if (!OpenConfig.getInstance(activity, mToken.getAppId()).getBoolean(OpenConfig.Key_WebLogin) && startActionActivity(activity, fragment, isAddRight)) {
+			// if (isForceLogin) {// 增量授权使用qzone进行的话上报一下
+            // Util.reportBernoulli(activity, "10785", 0, mToken.getAppId());
+            // }
+            SLog.i(TAG, "OpenUi, showUi, return Constants.UI_ACTIVITY");
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SSO_LOGIN,
+                    Constants.VIA_REPORT_TYPE_SSO_LOGIN, Constants.VIA_ACT_TYPE_FIVE, Constants.VIA_RESULT_SUCCESS,
+                    Constants.VIA_NO_VALUE, Constants.VIA_NO_VALUE);
+            return Constants.UI_ACTIVITY;
+		} else {
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SSO_LOGIN,
+                    Constants.VIA_REPORT_TYPE_SSO_LOGIN, Constants.VIA_ACT_TYPE_FIVE, Constants.VIA_RESULT_FAIL,
+                    Constants.VIA_NO_VALUE, Constants.VIA_NO_VALUE);
+            SLog.w(TAG, "doLogin startActivity fail show dialog.");
+			FeedConfirmListener feedListener = new FeedConfirmListener(mListener);
+			mListener = feedListener;
+			return showDialog(isAddRight, mListener);
+		}
+	}
+
+	@Override
+	public void releaseResource() {
+	//	mActivity = null;
+		mListener = null;
+	}
+
+	private int showDialog(boolean isAddRight, IUiListener listener) {
+        SLog.i(TAG, "OpenUi, showDialog -- start");
+        CookieSyncManager.createInstance(Global.getContext());
+
+        Bundle params = composeCGIParams();
+        if (isAddRight) {
+			params.putString("isadd", "1");
+		}
+        params.putString(Constants.PARAM_SCOPE, mScope);
+        params.putString(Constants.PARAM_CLIENT_ID, mToken.getAppId());
+    	if(isOEM) {
+    		params.putString("pf", PLATFORM+"-"+installChannel+"-"+VERSION+"-"+registerChannel+"-"+businessId);
+		} else {
+			params.putString("pf", DEFAULT_PF);
+		}
+
+        // add by toddzhao , 2013-04-22, 加上签名验证，防止非法app盗用合法appid
+        String timestr = System.currentTimeMillis() / 1000 + "";
+        String sign = SystemUtils.getAppSignatureMD5(Global.getContext(), timestr);
+        params.putString("sign", sign);
+        params.putString("time", timestr);
+
+
+        params.putString("display", "mobile");
+        params.putString("response_type", "token");
+        params.putString("redirect_uri", ServerSetting.DEFAULT_REDIRECT_URI);
+
+        params.putString("cancel_display", "1");
+        params.putString("switch", "1");
+        // a: android, i: ios, w: winphone
+        params.putString("status_userip", Util.getUserIp());
+        StringBuilder builder = new StringBuilder();
+        builder.append(ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_CGI_AUTHORIZE));
+        builder.append(HttpUtils.encodeUrl(params));
+
+        final String actionUrl = builder.toString();
+
+        final IUiListener lis = new TokenListener(Global.getContext(), listener, true, false);
+
+		SLog.d(TAG, "OpenUi, showDialog TDialog");
+		ThreadManager.executeOnSubThread(new Runnable() {
+
+			@Override
+			public void run() {
+				SystemUtils.extractSecureLib(SECURE_LIB_FILE_NAME, SECURE_LIB_NAME, SECURE_LIB_VERSION);
+				JniInterface.loadSo();
+				// 修复bad token问题
+				if (mActivity == null) {
+					return;
+				}
+				final Activity act = mActivity.get();
+				if (act != null) {
+					act.runOnUiThread(new Runnable() {
+						@Override
+						public void run() {
+							if (JniInterface.isJniOk) {
+								AuthDialog authDialog = new AuthDialog(act, ACTION_LOGIN, actionUrl, lis, mToken);
+								if (!act.isFinishing()) {
+									authDialog.show();
+								}
+							} else {
+								// so加载失败，提示下载手Q最新版本
+								SLog.w(TAG, "OpenUi, secure so load failed, goto download QQ.");
+								TDialog tDialog = new TDialog(act, "", getCommonDownloadQQUrl(""), null, mToken);
+								if (!act.isFinishing()) {
+									tDialog.show();
+								}
+							}
+						}
+					});
+				}
+			}
+		});
+		SLog.i(TAG, "OpenUi, showDialog -- end");
+        return Constants.UI_DIALOG;
+	}
+
+	private boolean startActionActivity(Activity activity, Fragment fragment, boolean isAddRight) {
+        SLog.i(TAG, "startActionActivity() -- start");
+		Intent loginIntent = getTargetActivityIntent(ACTIVITY_AGENT);
+		// 只使用手Q的互联登录, 否则使用浏览器, 不使用qzone的登录   <-- 谁改的，我改回来了 by yellowye
+		//if (loginIntent != null && Constants.PACKAGE_QQ.equals(loginIntent.getComponent().getPackageName())) {
+		if (loginIntent != null){
+			Bundle params = composeCGIParams();
+			if (isAddRight) {
+				params.putString("isadd", "1");
+			}
+			params.putString(Constants.PARAM_SCOPE, mScope);
+			params.putString(Constants.PARAM_CLIENT_ID, mToken.getAppId());
+
+			if(isOEM){
+				params.putString("pf", PLATFORM+"-"+installChannel+"-"+VERSION+"-"+registerChannel+"-"+businessId);
+			} else {
+				params.putString("pf", DEFAULT_PF);
+			}
+            params.putString("need_pay", "1");
+            params.putString(Constants.KEY_APP_NAME, SystemUtils.getAppName(Global.getContext()));
+            loginIntent.putExtra(Constants.KEY_ACTION, ACTION_LOGIN);
+            loginIntent.putExtra(Constants.KEY_PARAMS, params);
+			loginIntent.putExtra(Constants.PARAM_APP_ID, mToken.getAppId());
+
+            if (hasActivityForIntent(loginIntent)) {
+            	//donaldxu add for install feed confirm
+            	FeedConfirmListener feedListener = new FeedConfirmListener(mListener);
+            	mListener = feedListener;
+            	//dapingyu 兼容fragment
+            	UIListenerManager.getInstance().setListenerWithRequestcode(Constants.REQUEST_LOGIN, mListener);
+            	if(fragment != null) {
+                    SLog.d(TAG, "startAssitActivity fragment");
+                    startAssitActivity(fragment,loginIntent,Constants.REQUEST_LOGIN);
+                } else {
+                    SLog.d(TAG, "startAssitActivity activity");
+                    startAssitActivity(activity,loginIntent,Constants.REQUEST_LOGIN);
+                }
+                SLog.i(TAG, "startActionActivity() -- end, found activity for loginIntent");
+                OpenSdkStatic.getInstance().reportHaboCgi(0, "LOGIN_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), "", SystemClock.elapsedRealtime(), 0, 1, "");
+            	return true;
+            }
+		}
+        OpenSdkStatic.getInstance().reportHaboCgi(1, "LOGIN_CHECK_SDK", Constants.DEFAULT_UIN, mToken.getAppId(), "",
+                SystemClock.elapsedRealtime(), 0, 1, "startActionActivity fail");
+        SLog.i(TAG, "startActionActivity() -- end, no target activity for loginIntent");
+		return false;
+	}
+
+    /**
+     * 获取encry_token成功，则校验token并统计DAU
+     *
+     * @param encrytoken
+     */
+    protected void reportDAU(IUiListener listener) {
+        SLog.i(TAG, "reportDAU() -- start");
+        String g_skey = "tencent&sdk&qazxc***14969%%";
+        String version = "qzone3.4";
+        String token = mToken.getAccessToken();
+        String openid = mToken.getOpenId();
+        String appid = mToken.getAppId();
+        String encrytoken = "";
+        if (!TextUtils.isEmpty(token) && !TextUtils.isEmpty(openid) && !TextUtils.isEmpty(appid)) {
+            encrytoken = Util.encrypt(g_skey + token + appid + openid + version);
+        }
+        if (TextUtils.isEmpty(encrytoken)) {
+            SLog.e(TAG, "reportDAU -- encrytoken is null");
+            return;
+        }
+        String url = "https://openmobile.qq.com/user/user_login_statis";
+        Bundle params = composeCGIParams();
+        params.putString("encrytoken", encrytoken);
+        HttpUtils.requestAsync(mToken, Global.getContext(), url, params, Constants.HTTP_POST, null);
+        SLog.i(TAG, "reportDAU() -- end");
+    }
+
+    /**
+     * 校验token
+     *
+     * @param IUiListener
+     */
+    protected void checkLogin(IUiListener listener) {
+    	String url = "https://openmobile.qq.com/v3/user/get_info";
+    	Bundle params = composeCGIParams();
+    	params.putString("reqType", "checkLogin"); //校验token没有对应的后台api，没办法走了这个api，预设一个参数给后台以便区分
+		TempRequestListener requestListener = new TempRequestListener(new CheckLoginListener(listener));
+		HttpUtils.requestAsync(mToken, Global.getContext(), url, params,
+				Constants.HTTP_GET, requestListener);
+    }
+
+    private void initOpenidAndToken(String response) {
+        try {
+            JSONObject jsonObject = Util.parseJson(response);
+            String token = jsonObject.getString(Constants.PARAM_ACCESS_TOKEN);
+            String expires = jsonObject.getString(Constants.PARAM_EXPIRES_IN);
+            String openId = jsonObject.getString(Constants.PARAM_OPEN_ID);
+            if (!TextUtils.isEmpty(token) && !TextUtils.isEmpty(expires)
+                    && !TextUtils.isEmpty(openId)) {
+                mToken.setAccessToken(token, expires);
+                mToken.setOpenId(openId);
+            }
+        } catch(Exception e) {
+        }
+    }
+
+    private class CheckLoginListener implements IUiListener {
+    	IUiListener userListener;
+
+    	public CheckLoginListener(IUiListener listener) {
+    		this.userListener = listener;
+    	}
+
+    	@Override
+    	public void onComplete(Object response) {
+    		if (response == null) {
+    			SLog.e(TAG, "CheckLoginListener response data is null");
+    			return;
+    		}
+
+    		JSONObject json = (JSONObject) response;
+
+    		int ret;
+    		String msg;
+    		try {
+				ret = json.getInt("ret");
+				msg = (ret == 0) ? "success" : json.getString("msg");
+
+				if (userListener != null) {
+					userListener.onComplete(new JSONObject().put("ret", ret).put("msg", msg));
+				}
+			} catch (JSONException e) {
+				e.printStackTrace();
+				SLog.e(TAG, "CheckLoginListener response data format error");
+			}
+    	}
+
+    	@Override
+    	public void onError(UiError e) {
+    		if (userListener != null) {
+    			userListener.onError(e);
+    		}
+    	}
+
+    	@Override
+    	public void onCancel() {
+    		if (userListener != null) {
+    			userListener.onCancel();
+    		}
+    	}
+    }
+
+    private class FeedConfirmListener implements IUiListener {
+
+    	IUiListener userListener;
+    	private final String KEY_SHOWFEED = "sendinstall";
+    	private final String KEY_WORDING = "installwording";
+    	private final String SEND_INSTALL_APP_FEED_CGI = "http://appsupport.qq.com/cgi-bin/qzapps/mapp_addapp.cgi";
+
+    	public FeedConfirmListener(IUiListener listener) {
+    		userListener = listener;
+    	}
+
+		@Override
+        public void onComplete(Object response) {
+            if (response != null) {
+                JSONObject json = (JSONObject) response;
+
+                if (json != null) {
+                    boolean showConfirmDialog = false;
+                    String wording = "";
+                    try {
+                        showConfirmDialog = json.getInt(KEY_SHOWFEED) == 1 ? true : false;
+                        wording = json.getString(KEY_WORDING);
+                    } catch (JSONException e) {
+                        SLog.w(TAG, "FeedConfirmListener onComplete There is no value for sendinstall.");
+                    }
+
+                    wording = URLDecoder.decode(wording);
+                    SLog.v(TAG, " WORDING = " + wording + "xx");
+                    if (showConfirmDialog) {
+                        if (!TextUtils.isEmpty(wording)) {
+                            showFeedConfrimDialog(wording, userListener, response);
+                            return;
+                        }
+                    }
+
+                    if (userListener != null) {
+                        userListener.onComplete(response);
+                    }
+                }
+            }
+        }
+
+		private abstract class ButtonListener implements OnClickListener {
+			Dialog dialog;
+			ButtonListener(Dialog dialog) {
+				this.dialog = dialog;
+			}
+
+		}
+
+
+		private void showFeedConfrimDialog(String wording,
+				final IUiListener userListener,final Object response) {
+
+			if (mActivity == null) {
+				return;
+			}
+			Activity act = mActivity.get();
+			if (act == null) {
+				return;
+			}
+			Dialog dialog = new Dialog(act);
+			dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
+
+			PackageManager pm = act.getPackageManager();
+			PackageInfo packageInfo = null;
+			Drawable icon = null;
+			try {
+				packageInfo = pm.getPackageInfo(act.getPackageName(), 0);
+			} catch (NameNotFoundException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+
+
+
+			if (packageInfo != null) {
+				icon = packageInfo.applicationInfo.loadIcon(pm);
+			}
+
+			OnClickListener positiveListener = new ButtonListener(dialog) {
+
+				@Override
+				public void onClick(View arg0) {
+					sendFeedConfirmCgi();
+					if (dialog != null && dialog.isShowing()) {
+						dialog.dismiss();
+					}
+					if (userListener != null) {
+						userListener.onComplete(response);
+					}
+				}
+
+			};
+
+			OnClickListener negtListener = new ButtonListener(dialog) {
+
+				@Override
+				public void onClick(View arg0) {
+					if (dialog != null && dialog.isShowing()) {
+						dialog.dismiss();
+					}
+					if (userListener != null) {
+						userListener.onComplete(response);
+					}
+				}
+
+			};
+
+//			WindowManager.LayoutParams layoutParam = dialog.getWindow().getAttributes();
+//			layoutParam.format = PixelFormat.RGBA_8888;
+			ColorDrawable colorDrawable = new ColorDrawable();
+			colorDrawable.setAlpha(0);
+			dialog.getWindow().setBackgroundDrawable(colorDrawable);
+			View contentView = createContentView(act,icon, wording,positiveListener,negtListener);
+			dialog.setContentView(contentView);
+			OnCancelListener listener = new OnCancelListener() {
+
+				@Override
+				public void onCancel(DialogInterface arg0) {
+					if (userListener != null) {
+						userListener.onComplete(response);
+					}
+				}
+
+			};
+
+			dialog.setOnCancelListener(listener );
+			if (act != null && !act.isFinishing()) {
+				dialog.show();
+			}
+
+		}
+
+	    private Drawable getDrawable(String fileName,Context context) {
+
+	    	context = context.getApplicationContext();
+	        AssetManager assetManager = context.getAssets();
+
+	        Drawable drawable = null;
+	        try {
+	            InputStream inputStream = assetManager.open(fileName);
+	            if (inputStream == null) {
+	            	return null;
+	            }
+	            if (fileName.endsWith(".9.png")) {
+                    Bitmap bitmap = null;
+                    try {
+                        bitmap = BitmapFactory.decodeStream(inputStream);
+                    } catch (OutOfMemoryError e) {
+                        e.printStackTrace();
+                    }
+	                if (bitmap != null) {
+		                byte[] chunk = bitmap.getNinePatchChunk();
+		                boolean result = NinePatch.isNinePatchChunk(chunk);
+		                NinePatchDrawable patchy = new NinePatchDrawable(bitmap, chunk, new Rect(), null);
+		                drawable = patchy;
+	                } else {
+	                	return null;
+	                }
+	            } else {
+	            	drawable = Drawable.createFromStream(inputStream, fileName);
+	            	inputStream.close();
+
+	            }
+
+	        } catch (IOException e) {
+
+	        	e.printStackTrace();
+	        }
+	        return drawable;
+	    }
+
+		private View createContentView(Context context, Drawable icon, String wording,OnClickListener postionListener,OnClickListener negtListener ) {
+			// TODO Auto-generated method stub
+	        DisplayMetrics metric = new DisplayMetrics();
+	    	WindowManager wm = (WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
+	        wm.getDefaultDisplay().getMetrics(metric);
+	        float density = metric.density;
+
+			RelativeLayout contentView = new RelativeLayout(context);
+
+			//icon
+			ImageView imgView = new ImageView(context);
+			imgView.setImageDrawable(icon);
+			imgView.setScaleType(ImageView.ScaleType.FIT_XY);
+			imgView.setId(1);
+
+			int imgWeight = (int)(60*density);
+			int imgHeight = (int)(60*density);
+			int leftMargin = (int)(14*density);
+			int topMargin = (int)(18*density);
+			int rightMargin = (int)(6*density);
+			int bottomMargin = (int)(18*density);
+			LayoutParams imgParams = new LayoutParams(imgWeight,imgHeight);
+			imgParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT);
+			imgParams.setMargins(/*leftMargin*/0, topMargin, rightMargin, bottomMargin);
+
+			contentView.addView(imgView, imgParams);
+
+			// wording
+			TextView wordTextView = new TextView(context);
+			wordTextView.setText(wording);
+			wordTextView.setTextSize(14);
+			wordTextView.setGravity(Gravity.LEFT);
+			//wordTextView.setEllipsize(TextUtils.TruncateAt.END);
+//			wordTextView.setLineSpacing(6f, 1.f);
+			wordTextView.setIncludeFontPadding(false);
+			wordTextView.setPadding(0,0, 0, 0);
+			wordTextView.setLines(2);
+			wordTextView.setId(5);
+			wordTextView.setMinWidth((int)(185*density));
+			LayoutParams wordParams = new LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT/*(int)(185*density)*/, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+			wordParams.addRule(RelativeLayout.RIGHT_OF,1);  //location in right of imgView;
+			wordParams.addRule(RelativeLayout.ALIGN_TOP,1);
+			rightMargin = (int)(10*density);
+			wordParams.setMargins(0, 0, (int)(5*density), 0);
+			contentView.addView(wordTextView, wordParams);
+
+			//divide line
+			View divideView = new View(context);
+			divideView.setBackgroundColor(Color.rgb(214, 214, 214));
+			divideView.setId(3);
+			LayoutParams divideParams = new LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 2);
+			divideParams.addRule(RelativeLayout.BELOW,1);
+			topMargin = 0;
+			divideParams.addRule(RelativeLayout.ALIGN_LEFT,1);
+			divideParams.addRule(RelativeLayout.ALIGN_RIGHT,5);
+			divideParams.setMargins(0, 0,topMargin, (int)(12*density));
+			contentView.addView(divideView, divideParams);
+
+			//button
+			 LinearLayout buttonLayout = new LinearLayout(context);
+			 LayoutParams btnLayoutParams = new LayoutParams(android.view.ViewGroup.LayoutParams.WRAP_CONTENT,android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+			 btnLayoutParams.addRule(RelativeLayout.ALIGN_LEFT,1);
+			 btnLayoutParams.addRule(RelativeLayout.ALIGN_RIGHT,5);
+			 btnLayoutParams.addRule(RelativeLayout.BELOW,3);
+
+			 Button leftBtn = new Button(context);
+			 leftBtn.setText("跳过");
+			 Drawable leftBtnDrawable = getDrawable("buttonNegt.png",context);
+			 leftBtn.setBackgroundDrawable(leftBtnDrawable);
+			 leftBtn.setTextColor(Color.rgb(36,97,131));
+			 leftBtn.setTextSize(20);
+			 leftBtn.setOnClickListener(negtListener);
+			 leftBtn.setId(4);
+			 LinearLayout.LayoutParams leftBtnParams = new LinearLayout.LayoutParams(0,(int)(45*density));
+			 leftBtnParams.rightMargin = (int)(14*density);
+			 leftBtnParams.leftMargin = (int)(4*density);
+			 leftBtnParams.weight = 1.f;
+			 buttonLayout.addView(leftBtn, leftBtnParams);
+
+			 Button rightBtn = new Button(context);
+			 rightBtn.setText("确定");
+			 rightBtn.setTextSize(20);
+			 rightBtn.setTextColor(Color.rgb(255, 255, 255));
+			 Drawable rightBtnDrawable = getDrawable("buttonPost.png",context);
+			 rightBtn.setBackgroundDrawable(rightBtnDrawable);
+			 rightBtn.setOnClickListener(postionListener);
+			 LinearLayout.LayoutParams rightBtnParams = new LinearLayout.LayoutParams(0,(int)(45*density));
+			 rightBtnParams.weight = 1.f;
+			 rightBtnParams.rightMargin = (int)(4*density);
+			 buttonLayout.addView(rightBtn, rightBtnParams);
+
+//			 topMargin = (int)(12*density);
+//			 rightMargin = (int)(14*density);
+//			 bottomMargin = (int)(10*density);
+//			 btnLayoutParams.setMargins(0, topMargin, /*rightMargin*/0,/*bottomMargin*/0);
+			 contentView.addView(buttonLayout, btnLayoutParams);
+
+
+
+			 /*  button直接添加到contentView
+			 Button leftBtn = new Button(context);
+			 leftBtn.setText("跳过");
+			 Drawable leftBtnDrawable = getDrawable("buttonNegt.png",context);
+			 leftBtn.setBackgroundDrawable(leftBtnDrawable);
+			 leftBtn.setTextColor(Color.rgb(36,97,131));
+			 leftBtn.setTextSize(20);
+			 leftBtn.setOnClickListener(negtListener);
+			 leftBtn.setId(4);
+			 int buttonWidth = (int)(115*density);
+			 int buttonHeight = (int)(45*density);
+			 LayoutParams leftBtnParams = new LayoutParams(buttonWidth, buttonHeight);
+			 rightMargin = (int)(16*density);
+			 leftBtnParams.addRule(RelativeLayout.ALIGN_LEFT,1);
+			 leftBtnParams.addRule(RelativeLayout.BELOW,3);
+			 contentView.addView(leftBtn, leftBtnParams);
+
+			 Button rightBtn = new Button(context);
+			 LayoutParams rightBtnParams = new LayoutParams(buttonWidth, buttonHeight);
+
+			 rightBtnParams.addRule(RelativeLayout.ALIGN_RIGHT,5);
+			 rightBtnParams.addRule(RelativeLayout.BELOW,3);
+			 rightBtn.setText("确定");
+			 rightBtn.setTextSize(20);
+			 rightBtn.setTextColor(Color.rgb(255, 255, 255));
+			 Drawable rightBtnDrawable = getDrawable("buttonPost.png",context);
+			 rightBtn.setBackgroundDrawable(rightBtnDrawable);
+			 rightBtn.setOnClickListener(postionListener);
+			 contentView.addView(rightBtn,rightBtnParams);
+			 */
+
+			 int mainViewWidth = (int)(279*density);
+			 int mainViewHeight = (int)(163*density);
+			 FrameLayout.LayoutParams mainParams = new FrameLayout.LayoutParams(mainViewWidth,mainViewHeight/*LayoutParams.WRAP_CONTENT,LayoutParams.WRAP_CONTENT*/);
+			 //mainParams.gravity = Gravity.LEFT;
+			 contentView.setPadding((int)(14*density), 0, (int)(12*density), (int)(12*density));
+			 contentView.setLayoutParams(mainParams);
+			 contentView.setBackgroundColor(Color.rgb(247, 251, 247));
+
+			 //background
+			 PaintDrawable roundCornerDrawable = new PaintDrawable(Color.rgb(247, 251, 247));
+			 roundCornerDrawable.setCornerRadius(5*density);
+			 contentView.setBackgroundDrawable(roundCornerDrawable);
+			return contentView;
+		}
+
+		protected void sendFeedConfirmCgi() {
+			//no need to care the response
+			Bundle params = composeActivityParams();
+			if (mActivity == null) {
+				return;
+			}
+			Activity act = mActivity.get();
+			if (act != null) {
+				HttpUtils.requestAsync(mToken, act, SEND_INSTALL_APP_FEED_CGI,params, Constants.HTTP_POST, null);
+		}
+		}
+
+
+
+		@Override
+		public void onError(UiError e) {
+			if (userListener != null) {
+				userListener.onError(e);
+			}
+		}
+
+		@Override
+		public void onCancel() {
+			if (userListener != null) {
+				userListener.onCancel();
+			}
+		}
+
+    }
+}

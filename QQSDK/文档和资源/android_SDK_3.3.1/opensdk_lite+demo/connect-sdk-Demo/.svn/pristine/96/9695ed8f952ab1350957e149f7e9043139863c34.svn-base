@@ -1,0 +1,102 @@
+# -*- coding=UTF-8 -*-
+
+# -----------------------------------------
+# @todo: 这个文件是为QQ互联第三方SDK精准测试插桩使用
+# -----------------------------------------
+import os;
+import sys;
+
+# *脚本所在目录的上两级目录下的Tools目录* 加入Path
+sys.path.append(os.path.realpath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, "Tools")));
+from InsertLog_API import *
+
+#------------* 这里面存放一些各业务需要自定制的东西   *------------
+#0. 插桩的目录白名单(如果根目录所有的目录都要插桩，则配置['']即可)
+WHITE_DIRS_PRECISE = [
+                      '',
+             ];
+WHITE_DIRS_CROWDTEST = [ os.path.pardir, ];
+             
+
+#1.探针代码相对插桩路径的相对路径
+PROBE_POS = os.path.sep.join(["src","com"]);
+
+#2.以下配置影响探针文件内容
+PROBE_FILE_CONFIG = {
+    #探针类的包名
+    "PACKAGE" : "com.tencent.open",
+    #对非root手机要调用业务的LOG，可从ant脚本传参进来覆盖
+    "CUSTOM_LOG": 'android.util.Log.i("ravendiff",str );',
+}
+
+#3.考虑业务可能同时接入“精准测试”和“众包”，所以插桩策略要分别制订。
+#策略函数说明：参数是文件全名，如果函数返回True则插桩，返回False则不插桩。
+#  3.1.本业务“精准测试”策略函数：
+def __fileNameFilter_precise(filename):
+    ignore_names = ['PreciseLogCat_raven',
+                    ];
+    for name in ignore_names:
+        if ( filename.find(name) >= 0 ):
+            return False;
+        
+    return True;
+ 
+#  3.2.本业务“众测”策略函数
+crow_append_files = [
+                     ];
+crow_append_files = [ os.path.sep.join(item.split('/')) for item in crow_append_files ];
+
+#这个函数返回true，即代表需要对参数传进来的文件进行插桩。
+def __fileNameFilter_crowtest(filename):
+    for name in crow_append_files:
+        if ( filename.find(name) >= 0 ):
+            return True;
+    
+    ignore_names = [    'PreciseLogCat_raven',
+                         ];
+    for name in ignore_names:
+        if ( filename.find(name) >= 0 ):
+            return False;
+    return filename.lower().find('activity') >= 0
+
+#----------------------* end *-------------------------------
+import  os,re;
+import  string;
+def main(path, log_func=None):
+    #如果参数没传进来，就用本文件中配置的LOG形式
+    if ( log_func ):
+        PROBE_FILE_CONFIG['CUSTOM_LOG'] = log_func;
+    
+    #自定义PROBE文件，并放入合适位置
+    javaFile = os.path.join(os.path.realpath(os.path.dirname(__file__)), "PreciseLogCat_raven.jav");
+    dst = os.path.join( path, PROBE_POS ,'PreciseLogCat_raven.java');
+    with open(javaFile) as src, open(dst,'w') as dst:
+        cont = src.read();
+        is_precise = re.search(r'isAccurateTest\s*?=(.*?);',cont).group(1).strip();
+        t = string.Template( cont );
+        dst.write(t.substitute(PROBE_FILE_CONFIG));
+        
+    #2.插桩
+    print "Insert Begin... ", path
+    rootdir = path;
+    if (is_precise == 'true'):
+        for dir in WHITE_DIRS_PRECISE:
+            insert_byPath(os.path.join(rootdir,dir), package=PROBE_FILE_CONFIG['PACKAGE'], fileNameFilter=__fileNameFilter_precise);
+    else:
+        for dir in WHITE_DIRS_CROWDTEST:
+            insert_byPath(os.path.join(rootdir,dir), package=PROBE_FILE_CONFIG['PACKAGE'], fileNameFilter=__fileNameFilter_crowtest, willEncrypt=True );
+    print "Insert Done!"
+
+# #本地测试
+#if __name__ == "__main__":
+#     tm1 = time.time();
+#     main(r'D:\TencentSVN\QQConnect\sdk');
+#     print time.time() - tm1;
+
+ #正式上线应该走下面：
+if __name__ == "__main__":
+    import sys
+    if ( len(sys.argv)==3 ):
+        main(sys.argv[1],sys.argv[2]);
+    elif ( len(sys.argv)==2 ):
+        main(sys.argv[1]);

@@ -1,0 +1,4 @@
+#Fri Jan 19 15:23:10 CST 2018
+base.0=D\:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\transforms\\dex\\debug\\folders\\1000\\1f\\main
+renamed.0=classes.dex
+file.0=D\:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\transforms\\dex\\debug\\folders\\1000\\1f\\main\\classes.dex

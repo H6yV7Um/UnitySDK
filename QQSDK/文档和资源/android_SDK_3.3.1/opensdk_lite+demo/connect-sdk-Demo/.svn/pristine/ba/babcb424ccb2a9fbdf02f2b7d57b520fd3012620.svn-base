@@ -1,0 +1,409 @@
+package com.tencent.open.yyb;
+
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Util;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.net.Uri;
+import android.text.TextUtils;
+import android.webkit.WebView;
+
+/**
+ * webview里头js跟java互通的桥梁<br/>
+ * js调用的方法通过权限验证后统一使用反射调用，所以方法签名统一为：fun(Uri uri,int seqid,String method,String
+ * callbackFun) 请求参数通过uri中解析获得<br/>
+ * 调用的方法为js形如：window.location.href=
+ * "jsb://queryDownload/123/callback?apkid=16771755";
+ * 分别是：jsb://方法名/系列号/回调方法?参数key=value 回调方法如不需要可以不用。但是需要调用的方法名和系列号必须要
+ * 
+ */
+public class AppbarJsBridge {
+
+    private static final String TAG = SLog.TAG + ".AppbarJsBridge";
+	public static final String CALLBACK_LOGIN="loginCallback";//登录结果回调
+	public static final String CALLBACK_SHARE = "shareCallback"; //分享结果的回调
+	public static final String BUTTON_CLICK_CALLBACK_FUNCTION_NAME = "clickCallback";
+	public static final String READY_CALLBACK_FUNCTION_NAME="readyCallback";//接口授权准备完毕回调
+	
+	public static final String JS_BRIDGE_SCHEME = "jsb://";
+	//接口版本号
+	public static final int JSBRIDGE_VERSION = 1;
+
+	private static final String CALL_BATCH_NAME = "callBatch";
+
+	//下面的参数不要随便改动，为了和应用宝里面的H5回调保持一致
+	public static final int Result_OK = 0;
+	public static final int Result_Fail = -1;
+	public static final int Code_None = -2;
+	public static final int Code_Java_Exception = -3;	
+	public static final int AUTHORIZE_FAIL = -5;
+
+	public final static int SHARE_QQ = 1;
+	public final static int SHARE_QZ = 2;
+	public final static int SHARE_WX = 3;
+	public final static int SHARE_TIMELINE = 4;
+	
+	//private AppbarDialog mDialog;
+	private WebView mWebView;	
+	private Activity mActivity;
+	
+	public AppbarJsBridge(Activity activity, WebView webView) {
+		mActivity = activity;
+		mWebView = webView;
+	}
+
+	/**
+	 * 关闭webview
+	 */
+	public void closeWebView(final Uri uri, final int seqid,
+			final String method, final String callback) {
+		SLog.v(TAG, "-->closeWebView : url = " + uri);
+		mActivity.finish();
+	}
+
+	/**
+	 * 上一页，下一页，刷新
+	 * 
+	 * @param type
+	 * @param function
+	 */
+	public void pageControl(final Uri uri, final int seqid,
+			final String method, final String function) {
+		SLog.v(TAG, "-->pageControl : url = " + uri);
+		int type = Util.parseIntValue(uri.getQueryParameter("type"));
+		if (mWebView != null) {
+			if (type == 1) {
+				mWebView.goBack();
+			} else if (type == 2) {
+				mWebView.goForward();
+			} else {
+				mWebView.reload();
+			}
+		}
+		response(function, seqid, method, "");
+	}
+
+	public void share(final Uri uri, final int seqid, String method,
+			final String callbackFun) {
+		SLog.v(TAG, "-->share : url = " + uri);
+		String title = uri.getQueryParameter("title");
+		String summary = uri.getQueryParameter("summary");
+		String iconUrl = uri.getQueryParameter("iconUrl");
+		if (TextUtils.isEmpty(iconUrl)) {
+			iconUrl = "http://qzs.qq.com/open/mobile/jsbridge/demo.htm";
+		}
+		String jumpUrl = uri.getQueryParameter("jumpUrl");
+		SLog.v(TAG, "-->share : title = " + title);
+		SLog.v(TAG, "-->share : summary = " + summary);
+		SLog.v(TAG, "-->share : iconUrl = " + iconUrl);
+		SLog.v(TAG, "-->share : jumpUrl = " + jumpUrl);
+		ShareModel model = new ShareModel();
+		model.mTitle = title;
+		model.mDescription = summary;
+		model.mIconUrl = iconUrl;
+		model.mTargetUrl = jumpUrl;
+		((AppbarActivity) mActivity).setShareModel(model);
+		//mAgent.setShareModel(model);
+		int type = Util.parseIntValue(uri.getQueryParameter("type"), 0);
+		switch (type) {
+		case 1:// 分享到QQ
+			((AppbarActivity) mActivity).shareToQQ();
+			//shareToQQ();
+			break;
+		case 2:// 分享到空间
+			((AppbarActivity) mActivity).shareToQzone();
+			break;
+		case 3:// 分享到微信
+			((AppbarActivity) mActivity).shareToWX();
+			break;
+		case 4:// 分享到朋友圈
+			((AppbarActivity) mActivity).shareToTimeline();
+			break;
+		case 0:
+			// 如果是0，触发BrowserActivity的按钮点击
+		default:
+			((AppbarActivity)mActivity).showFloatingDialog();
+			//mDialog.showFloatingDialog();
+			break;
+		}
+	}
+	
+	/**
+	 * 获取apk信息
+	 * 
+	 * @param packageName
+	 *            应用包名
+	 * @param seqid
+	 *            回调的系列号
+	 * @param callbackFun
+	 *            回调的方法名称
+	 */
+	public void getAppInfo(final Uri uri, final int seqid, final String method,
+			final String callbackFun) {
+		final String packageNames = uri.getQueryParameter("packagenames");
+		SLog.d(TAG, "-->getAppInfo : packageNames = " + packageNames);
+		if (TextUtils.isEmpty(packageNames) || TextUtils.isEmpty(callbackFun)) {
+			return;
+		}
+
+		String[] pkgs = packageNames.split(",");
+		if (pkgs == null || pkgs.length == 0) {
+			return;
+		}
+		JSONObject result = new JSONObject();
+		for (String pkg : pkgs) {
+			String pkgName = pkg.trim();
+			PackageInfo info = null;
+			try {
+				info = mActivity.getPackageManager().getPackageInfo(pkgName, 0);
+			} catch (NameNotFoundException e1) {
+				SLog.e(TAG, "-->getAppInfo : NameNotFoundException e1",e1);
+			}
+			//LocalApkInfo apkInfo = ApkResourceManager.getInstance()
+			//		.getLocalApkInfo(pkgName);
+			try {
+				JSONObject json = new JSONObject();
+				if (info != null) {
+					json.put("install", 1);
+					json.put("appName", info.applicationInfo.name);//apkInfo.mAppName);
+					json.put("verCode", info.versionCode);
+					json.put("verName", info.versionName);
+				} else {
+					json.put("install", 0);
+				}
+				result.put(pkgName, json);
+			} catch (Exception e) {
+				responseFail(callbackFun, seqid, method, Code_Java_Exception);
+			}
+		}
+		SLog.v(TAG, "-->getAppInfo : result = " + result.toString());
+		response(callbackFun, seqid, method, result.toString());
+
+	}
+	
+	public void clickCallback(){
+		response(BUTTON_CLICK_CALLBACK_FUNCTION_NAME, 0, null, "");
+	}
+	
+	public void openNewWindow(final Uri uri,final int seqid, String method,final String callbackFun){
+		String url = uri.getQueryParameter("url");
+		try{
+			Intent appbarIntent = new Intent(mActivity, AppbarActivity.class);
+			appbarIntent.putExtra("url", url);
+			mActivity.startActivity(appbarIntent);
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+	}
+	
+	public void setWebView(final Uri uri,final int seqid,final String method, final String function) {
+		try {
+			final String title = uri.getQueryParameter("title");
+			final int buttonVisiable = Util.parseIntValue(uri.getQueryParameter("buttonVisible"), 0);
+			if (!TextUtils.isEmpty(title)) {
+				((AppbarActivity) mActivity).setAppbarTitle(title);
+			}
+			((AppbarActivity) mActivity).setShareVisibility(buttonVisiable == 1);
+			SLog.v(TAG, "-->setWebView : url = " + uri + " -- buttonVisiable = " + buttonVisiable);
+			response(function, seqid, method, "");
+		} catch (Exception e) {
+			responseFail(function, seqid, method, Code_Java_Exception);
+		}
+		
+	}
+
+	public void openLoginActivity(final Uri uri, final int seqid,
+			final String method, final String callbackFun) {
+		SLog.v(TAG, "-->openLoginActivity : url = " + uri);
+		((AppbarActivity) mActivity).login();
+	}
+	
+	public int getVersion() {
+		return JSBRIDGE_VERSION;
+	}
+
+	/**
+	 * 负责url的调用处理逻辑
+	 * 
+	 * @param url
+	 */
+	public void invoke(String url) {
+		SLog.v(TAG, "-->invoke : url = " + url);
+		Uri uri = Uri.parse(url);
+		// 将URI中的host作为方法名，path中的第一个作为回call的方法名，如果没有回call的方法名，则不回call
+		String hostAsMethodName = uri.getHost();
+		SLog.v(TAG, "-->invoke : hostAsMethodName = " + hostAsMethodName);
+		if (TextUtils.isEmpty(hostAsMethodName)) {
+			return;
+		}
+		List<String> paths = uri.getPathSegments();
+		int seqid = 0;// 系列号，任何请求都要系列号，因为是异步调用，不然无法关联上
+		String callbackName = null;
+		if (paths != null && paths.size() > 0) {
+			seqid = Util.parseIntValue(paths.get(0));
+			if (paths.size() > 1) {
+				callbackName = paths.get(1);
+			}
+		}
+		SLog.v(TAG, "-->invoke : seqid = " + seqid + " callbackName = " + callbackName);
+
+		// 合并调用啦~
+		if (hostAsMethodName.equals(CALL_BATCH_NAME)) {
+			try {
+				String param = uri.getQueryParameter("param");
+				JSONArray jsonArray = new JSONArray(param);
+				int length = jsonArray.length();
+				for (int i = 0; i < length; i++) {
+					JSONObject jsonObject = jsonArray.getJSONObject(i);
+					String method = jsonObject.getString("method");
+					int seqidOfCall = jsonObject.getInt("seqid");
+					String callback = jsonObject.optString("callback");
+					JSONObject args = jsonObject.getJSONObject("args");
+					StringBuilder uriBuilder = new StringBuilder();
+					uriBuilder
+							.append(JS_BRIDGE_SCHEME)
+							.append(method)
+							.append("/")
+							.append(seqidOfCall)
+							.append("/")
+							.append(!TextUtils.isEmpty(callback) ? callback
+									: "").append("?");
+					if (args != null) {
+						Iterator iterator = args.keys();
+						while (iterator.hasNext()) {
+							String key = (String) iterator.next();
+							String value = Uri.decode(args.getString(key));// todo
+																			// decode
+							uriBuilder.append(key).append("=")
+									.append(Uri.encode(value)).append("&");
+						}
+					}
+					Uri uriForCall = Uri.parse(uriBuilder.toString());
+					callAMethod(uriForCall, method, seqidOfCall, callback);
+				}
+			} catch (Exception ex) {
+				if (!TextUtils.isEmpty(callbackName)) {
+					responseFail(callbackName, seqid, hostAsMethodName,
+							AUTHORIZE_FAIL);
+				}
+			}
+		} else {
+			callAMethod(uri, hostAsMethodName, seqid, callbackName);
+		}
+	}
+
+	private void callAMethod(Uri uri, String hostAsMethodName, int seqid,
+			String callbackName) {
+		SLog.v(TAG, "-->callAMethod : uri = " + uri);
+		if (authorize(hostAsMethodName)) {//授权通过，调用接口
+			try {
+				Method method = AppbarJsBridge.class.getDeclaredMethod(
+						hostAsMethodName, Uri.class, Integer.TYPE,
+						String.class, String.class);
+				method.invoke(this, uri, seqid, hostAsMethodName, callbackName);
+			} catch (Exception ex) {
+				SLog.d(TAG, "-->callAMethod : Exception = ",ex);
+				ex.printStackTrace();
+				if (!TextUtils.isEmpty(callbackName)) {
+					responseFail(callbackName, seqid, hostAsMethodName,
+							Code_Java_Exception);
+				}
+			}
+		} else {
+			if (!TextUtils.isEmpty(callbackName)) {
+				responseFail(callbackName, seqid, hostAsMethodName,
+						AUTHORIZE_FAIL);
+			}
+		}
+	}
+
+	private boolean authorize(String hostAsMethodName) {
+		return true;
+	}
+	
+	public void ready() {
+		response(READY_CALLBACK_FUNCTION_NAME, 1, null, "true");
+	}
+	
+	public void responseShare(int type) {
+		HashMap<String, String> map = new HashMap<String, String>();
+		map.put("type", type+"");
+		response(CALLBACK_SHARE, 0, null, "0",map);
+	}
+	
+	public void responseShareFail(int type) {
+		HashMap<String, String> map = new HashMap<String, String>();
+		map.put("type", type+"");
+		response(CALLBACK_SHARE, 0, null, "1",map);
+	}
+
+	public void response(String function, int seqid, String method,
+			String result) {
+		response(function, seqid, method, result, null);
+	}
+
+	public void response(String function, int seqid, String method,
+			String result, Map<String, String> extMap) {
+		if (TextUtils.isEmpty(function)) {
+			return;
+		}
+		JSONObject json = new JSONObject();
+		try {
+			json.put("result", Result_OK);
+			json.put("data", result);
+			if (!TextUtils.isEmpty(method)) {
+				json.put("method", method);
+			}
+			json.put("seqid", seqid);
+			if (extMap != null) {
+				for (String key : extMap.keySet()) {
+					json.put(key, extMap.get(key));
+				}
+			}
+
+			callback(function, json.toString());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public void responseFail(String callbackFun,int seqid, String method, int code) {
+		if(TextUtils.isEmpty(callbackFun)) {
+			return;
+		}
+		JSONObject json = new JSONObject();
+		try {
+			json.put("result", Result_Fail);
+			json.put("code", code);
+			json.put("method", method);
+			json.put("seqid", seqid);
+			callback(callbackFun, json.toString());
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	public void callback(String function, String result) {
+		if (mWebView != null) {
+			StringBuffer sb = new StringBuffer("javascript:");
+			sb.append("if(!!").append(function).append("){");
+			sb.append(function);
+			sb.append("(");
+			sb.append(result);
+			sb.append(")}");
+			mWebView.loadUrl(sb.toString());
+		}
+	}
+
+}

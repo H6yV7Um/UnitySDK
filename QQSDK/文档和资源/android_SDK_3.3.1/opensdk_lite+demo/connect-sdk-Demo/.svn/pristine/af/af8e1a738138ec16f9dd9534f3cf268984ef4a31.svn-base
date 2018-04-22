@@ -1,0 +1,46 @@
+/**
+ * Name : Const.java<br>
+ * Copyright : Copyright (c) Tencent Inc. All rights reserved.<br>
+ * Description : Constants And Designtime Configs of Whole Wns Frameworks<br>
+ */
+package com.tencent.open.log;
+
+import java.io.File;
+
+/**
+ * @author lewistian
+ *
+ */
+public class LogConstants
+{
+    /**
+     * 调试常量
+     *
+     */
+    // SDK发布时Check
+    public final static String OpenSDK_TAG = "openSDK_LOG";
+    public static int LogLevel = TraceLevel.ABOVE_VERBOSE; // SDK发布的时候Log级别: INFO及以上级别的log才会输出
+    public static int DefFileTraceLevel = TraceLevel.ABOVE_DEBUG; // ASSERT级别的日子信息会输出到log文件
+
+    // 其他配置信息
+//    public static boolean InfiniteTraceFile = false; // 文件日志无限记录开关
+//    public static boolean NeedAttached = false; // 是否允许服务等待调试器
+//    public static boolean ShowErrorCode = false; // 错误提示信息显示错误码
+//    public static String FileTracerName = "OpenSDK.File.Tracer";
+    public static String ClientFileTracerName = "OpenSDK.Client.File.Tracer";
+    //路径先用写死的方法，后续可以考虑通过通信把QLog的路径传递过来，方法是QLogImpl.getLogPath();
+    public static String FileRoot = "Tencent" + File.separator + "msflogs" + File.separator + "com" + File.separator + "tencent" + File.separator + "mobileqq" + File.separator;
+//    public static String FileExt = ".OpenSDK.log";
+    public static String ClientFileExt = ".log";
+    public static long MinSpaceRequired = 8 * 1024 * 1024; // 外存最小空间要求：8M
+    public static int FileBlockSize = 256 * 1024; // 固定分片大小：256K
+    public static int DataThreshold = 1 * 1024; // 数据量阈值：默认8K，单位字符
+    public static int TimeThreshold = 10 * 1000; // 时间阈值：
+
+    public static String FileBlockCount = "debug.file.blockcount";
+    public static String FileKeepPeriod = "debug.file.keepperiod";
+    public static String FileTraceLevel = "debug.file.tracelevel";
+
+    public static int DefFileBlockCount = 24; // 6MB
+    public static long DefFileKeepPeriod = 7 * 24 * 60 * 60 * 1000L; // 7天
+}

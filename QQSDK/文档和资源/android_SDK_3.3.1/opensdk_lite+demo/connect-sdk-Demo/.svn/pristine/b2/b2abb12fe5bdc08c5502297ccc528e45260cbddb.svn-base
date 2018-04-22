@@ -1,0 +1,48 @@
+package com.tencent.open;
+
+import android.location.Location;
+
+import com.tencent.map.lbsapi.api.SOSOMapLBSApi;
+import com.tencent.map.lbsapi.api.SOSOMapLBSApiListener;
+import com.tencent.map.lbsapi.api.SOSOMapLBSApiResult;
+import com.tencent.open.LbsAgent.OnGetLocationListener;
+import com.tencent.open.log.SLog;
+
+public class SosoLocationListener extends SOSOMapLBSApiListener {
+    private static final String TAG = SLog.TAG + ".SosoLocationListener";
+	private OnGetLocationListener listener;
+	public SosoLocationListener(OnGetLocationListener listener) {
+		super(SOSOMapLBSApi.REQ_TYPE_LOC, SOSOMapLBSApi.REQ_GEO_TYPE_WGS84, 
+				SOSOMapLBSApi.REQ_LEVEL_GEO, SOSOMapLBSApi.REQ_DELAY_NORMAL);
+		this.listener = listener;
+	}
+
+	@Override
+	public void onLocationDataUpdate(byte[] arg0, int arg1) {
+		super.onLocationDataUpdate(arg0, arg1);
+	}
+
+	@Override
+	public void onLocationUpdate(SOSOMapLBSApiResult arg0) {
+		SLog.i(TAG, "location: onLocationUpdate = "
+				+ arg0);
+		super.onLocationUpdate(arg0);
+		
+		if (arg0 == null) return;
+		
+		Location l = new Location("passive");
+		l.setLatitude(arg0.Latitude);
+		l.setLongitude(arg0.Longitude);
+		
+		if (listener != null)
+			listener.onLocationUpdate(l);
+	}
+
+	@Override
+	public void onStatusUpdate(int arg0) {
+		SLog.i(TAG, "location: onStatusUpdate = "
+				+ arg0);
+		super.onStatusUpdate(arg0);
+	}
+	
+}

@@ -1,0 +1,142 @@
+package com.tencent.open.widget;
+
+import android.content.Context;
+import android.view.KeyEvent;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+
+import com.tencent.open.log.SLog;
+import com.tencent.open.web.security.CaptureInputConnection;
+import com.tencent.open.web.security.SecureJsInterface;
+
+public class SecureWebView extends OpenWebView {
+    private static final String TAG = SLog.TAG + ".SecureWebView";
+
+	private KeyEvent mfakeKey;
+	private CaptureInputConnection cInputConnection;
+	
+	/**
+	 * 当前设备是否支持自定义输入通道，部分机型不支持
+	 */
+	public static boolean sDeviceSupport;
+
+	public SecureWebView(Context context) {
+		super(context);
+	}
+
+	@Override
+	public boolean dispatchKeyEvent(KeyEvent event) {
+		SLog.d(TAG, "-->dispatchKeyEvent, is device support: " + sDeviceSupport);
+		if (!sDeviceSupport) {
+			return super.dispatchKeyEvent(event);
+		}
+		if (event.getAction() == KeyEvent.ACTION_DOWN) {
+			switch (event.getKeyCode()) {
+			case KeyEvent.KEYCODE_DEL:
+				// 设置退格键标志
+				CaptureInputConnection.BackSpaceflag = true;
+				return super.dispatchKeyEvent(event);
+
+			case KeyEvent.KEYCODE_BACK:
+				return super.dispatchKeyEvent(event);
+				
+			case KeyEvent.KEYCODE_ENTER:
+				return super.dispatchKeyEvent(event);
+				
+
+			default:
+				// 某些复合按键的输入可能导致两次按键
+				if (event.getUnicodeChar() == 0) {
+					return super.dispatchKeyEvent(event);
+				}
+
+				if (SecureJsInterface.isPWDEdit) {
+					int unicodeChar = event.getUnicodeChar();
+					
+					// 合法的密码字符unicode范围
+					if ( ((unicodeChar >= 33) && (unicodeChar <= 95)) || ((unicodeChar >= 97) && (unicodeChar <= 125)))  {
+						mfakeKey = new KeyEvent(KeyEvent.ACTION_DOWN,
+								KeyEvent.KEYCODE_STAR);
+						return super.dispatchKeyEvent(mfakeKey);	
+					}
+					
+				}
+
+				return super.dispatchKeyEvent(event);
+			}
+		}
+		
+		
+		
+		return super.dispatchKeyEvent(event);
+	}
+
+	/**
+	 * 这里构造伪造的虚假按键
+	 */
+	@Override
+	public boolean onKeyDown(int keyCode, KeyEvent event) {
+		SLog.d(TAG, "-->onKeyDown, is device support: " + sDeviceSupport);
+		if (!sDeviceSupport) {
+			return super.onKeyDown(keyCode, event);
+		}
+		if (event.getAction() == KeyEvent.ACTION_DOWN) {
+			switch (event.getKeyCode()) {
+			case KeyEvent.KEYCODE_DEL:
+				// 设置退格键标志
+				CaptureInputConnection.BackSpaceflag = true;
+				return super.onKeyDown(keyCode, event);
+
+			case KeyEvent.KEYCODE_BACK:
+				return super.onKeyDown(keyCode, event);
+				
+			case KeyEvent.KEYCODE_ENTER:
+				return super.onKeyDown(keyCode, event);
+				
+
+			default:
+				// 某些复合按键的输入可能导致两次按键
+				if (event.getUnicodeChar() == 0) {
+					return super.onKeyDown(keyCode, event);
+				}
+
+				if (SecureJsInterface.isPWDEdit) {
+					int unicodeChar = event.getUnicodeChar();
+
+					
+					// 合法的密码字符unicode范围
+					if ( ((unicodeChar >= 33) && (unicodeChar <= 95)) || ((unicodeChar >= 97) && (unicodeChar <= 125)))  {
+						mfakeKey = new KeyEvent(KeyEvent.ACTION_DOWN,
+								KeyEvent.KEYCODE_STAR);
+						return super.onKeyDown(mfakeKey.getKeyCode(), mfakeKey);	
+					}
+					
+				}
+
+				return super.onKeyDown(keyCode, event);
+			}
+		}
+		return super.onKeyDown(keyCode, event);
+	}
+
+	// 重载系统函数，获取键盘输入，获取软件盘输入
+	@Override
+	public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+		// 当JS层通知我，焦点落在密码输入框的时候，才重载，调用自定义的inputconnection
+		SLog.i(TAG, "-->create input connection, is edit: " + SecureJsInterface.isPWDEdit);
+		
+		InputConnection inputConn = super.onCreateInputConnection(outAttrs);
+		SLog.v(TAG, "-->onCreateInputConnection, inputConn is " + inputConn);
+		if (inputConn != null) {
+			sDeviceSupport = true;
+			cInputConnection = new CaptureInputConnection(
+					super.onCreateInputConnection(outAttrs), false);
+			return cInputConnection;
+		}
+		sDeviceSupport = false;
+		
+		return inputConn;
+
+	}
+
+}

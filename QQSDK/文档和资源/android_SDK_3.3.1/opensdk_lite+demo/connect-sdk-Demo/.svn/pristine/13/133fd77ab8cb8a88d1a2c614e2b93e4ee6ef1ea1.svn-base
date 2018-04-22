@@ -1,0 +1,216 @@
+package com.tencent.open;
+
+import java.io.IOException;
+import java.io.InputStream;
+
+import android.app.Dialog;
+import android.content.Context;
+import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.NinePatchDrawable;
+import android.graphics.drawable.PaintDrawable;
+import android.text.TextPaint;
+import android.util.DisplayMetrics;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+import android.widget.RelativeLayout.LayoutParams;
+
+public class ConfirmDialog extends Dialog {
+	private static final int ID_TITLE = 10;
+	private static final int ID_MESSAGE = 11;
+	private static final int ID_DIVIDER = 12;
+	
+	private static final int ID_POSITIVE_BTN = 13;
+	private static final int ID_NEGATIVE_BTN = 14;
+	
+	private TextView mTitle;
+	private TextView mMessage;
+	private Button mNegativeBtn;
+	private Button mPositiveBtn;
+
+	public ConfirmDialog(Context context) {
+		super(context);
+
+		ColorDrawable colorDrawable = new ColorDrawable();
+		colorDrawable.setAlpha(0);
+		getWindow().setBackgroundDrawable(colorDrawable);
+		
+		setContentView(createContentView(context));
+	}
+	
+	public ConfirmDialog setTitle(String title) {
+		mTitle.setText(title);
+		return this;
+	}
+	
+	public ConfirmDialog setMessage(String message) {
+		mMessage.setText(message);
+		return this;
+	}
+	
+	public ConfirmDialog setNegativeText(String text) {
+		mNegativeBtn.setText(text);
+		return this;
+	}
+	
+	public ConfirmDialog setPositiveText(String text) {
+		mPositiveBtn.setText(text);
+		return this;
+	}
+	
+	public ConfirmDialog setPositiveOnClikLitener(android.view.View.OnClickListener listener) {
+		mPositiveBtn.setOnClickListener(listener);
+		return this;
+	}
+	
+	public ConfirmDialog setNegativeOnClikLitener(android.view.View.OnClickListener listener) {
+		mNegativeBtn.setOnClickListener(listener);
+		return this;
+	}
+
+	@SuppressWarnings("deprecation")
+	private View createContentView(Context context) {
+		DisplayMetrics metric = new DisplayMetrics();
+		WindowManager wm = (WindowManager) context
+				.getSystemService(Context.WINDOW_SERVICE);
+		wm.getDefaultDisplay().getMetrics(metric);
+		float density = metric.density;
+		
+		int imgWeight = (int) (60 * density);
+		int imgHeight = (int) (60 * density);
+		int leftMargin = (int) (14 * density);
+		int topMargin = (int) (18 * density);
+		int rightMargin = (int) (6 * density);
+		int bottomMargin = (int) (18 * density);
+
+		RelativeLayout contentView = new RelativeLayout(context);
+		
+		LayoutParams params = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);	
+		mTitle = new TextView(context);
+		mTitle.setTextSize(17);
+		mTitle.setId(ID_TITLE);
+		TextPaint tp = mTitle.getPaint(); 
+		tp.setFakeBoldText(true); 
+		params.addRule(RelativeLayout.CENTER_HORIZONTAL);
+		params.setMargins(0, 20, 0, 0);
+		contentView.addView(mTitle, params);
+
+		// wording
+		mMessage = new TextView(context);
+		mMessage.setTextSize(16);
+		mMessage.setIncludeFontPadding(false);
+		params.setMargins(0, 20, 0, 0);
+		mMessage.setLines(2);
+		mMessage.setId(ID_MESSAGE);
+		mMessage.setMinWidth((int) (185 * density));
+		params = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+		params.addRule(RelativeLayout.BELOW, ID_TITLE);
+		contentView.addView(mMessage, params);
+
+		// divide line
+		View divideView = new View(context);
+		divideView.setBackgroundColor(Color.rgb(214, 214, 214));
+		divideView.setId(ID_DIVIDER);
+		LayoutParams divideParams = new LayoutParams(LayoutParams.WRAP_CONTENT, 2);
+		divideParams.addRule(RelativeLayout.BELOW, ID_MESSAGE);
+		divideParams.setMargins(0, 10, 0, (int) (12 * density));
+		contentView.addView(divideView, divideParams);
+
+		// button
+		LinearLayout buttonLayout = new LinearLayout(context);
+		params = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+		params.addRule(RelativeLayout.ALIGN_LEFT, ID_DIVIDER);
+		params.addRule(RelativeLayout.ALIGN_RIGHT, ID_DIVIDER);
+		params.addRule(RelativeLayout.BELOW, ID_DIVIDER);
+
+		mNegativeBtn = new Button(context);
+		Drawable leftBtnDrawable = getDrawable("buttonNegt.png", context);
+		mNegativeBtn.setBackgroundDrawable(leftBtnDrawable);
+		mNegativeBtn.setTextColor(Color.rgb(36, 97, 131));
+		mNegativeBtn.setTextSize(18);
+		mNegativeBtn.setId(ID_NEGATIVE_BTN);
+		LinearLayout.LayoutParams btnParams = new LinearLayout.LayoutParams(
+				LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+		btnParams.weight = 1.0f;
+		btnParams.rightMargin = (int)(14*density);
+		btnParams.leftMargin = (int)(4*density);
+		buttonLayout.addView(mNegativeBtn, btnParams);
+
+		mPositiveBtn = new Button(context);
+		mPositiveBtn.setTextSize(18);
+		mPositiveBtn.setTextColor(Color.rgb(255, 255, 255));
+		Drawable rightBtnDrawable = getDrawable("buttonPost.png", context);
+		mPositiveBtn.setBackgroundDrawable(rightBtnDrawable);
+		btnParams = new LinearLayout.LayoutParams(
+				LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+		btnParams.weight = 1.0f;
+		btnParams.rightMargin = (int)(4*density);
+		buttonLayout.addView(mPositiveBtn, btnParams);
+
+		contentView.addView(buttonLayout, params);
+
+		int mainViewWidth = (int) (279 * density);
+		int mainViewHeight = (int) (163 * density);
+		FrameLayout.LayoutParams mainParams = new FrameLayout.LayoutParams(
+				mainViewWidth, mainViewHeight);
+		contentView.setPadding((int) (10 * density), 0, (int) (10 * density),
+				(int) (12 * density));
+		contentView.setLayoutParams(mainParams);
+		contentView.setBackgroundColor(Color.rgb(247, 251, 247));
+
+		// background
+		PaintDrawable roundCornerDrawable = new PaintDrawable(Color.rgb(247,
+				251, 247));
+		roundCornerDrawable.setCornerRadius(5 * density);
+		contentView.setBackgroundDrawable(roundCornerDrawable);
+		return contentView;
+	}
+	
+	private Drawable getDrawable(String fileName, Context context) {
+		context = context.getApplicationContext();
+		AssetManager assetManager = context.getAssets();
+
+		Drawable drawable = null;
+		try {
+			InputStream inputStream = assetManager.open(fileName);
+			if (inputStream == null) {
+				return null;
+			}
+			if (fileName.endsWith(".9.png")) {
+                Bitmap bitmap = null;
+                try {
+                    bitmap = BitmapFactory.decodeStream(inputStream);
+                } catch (OutOfMemoryError e) {
+                    e.printStackTrace();
+					bitmap = null;
+                }
+				if (bitmap != null) {
+					byte[] chunk = bitmap.getNinePatchChunk();
+					NinePatchDrawable patchy = new NinePatchDrawable(bitmap,
+							chunk, new Rect(), null);
+					drawable = patchy;
+				} else {
+					return null;
+				}
+			} else {
+				drawable = Drawable.createFromStream(inputStream, fileName);
+				inputStream.close();
+			}
+		} catch (IOException e) {
+
+			e.printStackTrace();
+		}
+		return drawable;
+	}
+
+}

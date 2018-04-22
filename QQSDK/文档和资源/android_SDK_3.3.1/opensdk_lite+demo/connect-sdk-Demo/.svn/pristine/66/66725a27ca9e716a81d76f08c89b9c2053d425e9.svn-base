@@ -1,0 +1,196 @@
+package com.tencent.tauth;
+
+import org.json.JSONObject;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.text.TextUtils;
+
+import com.tencent.connect.common.AssistActivity;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.tauth.IUiListener;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Util;
+
+/**
+ * SDK使用该Activity来接收登录授权以及其他接口的回调，
+ * 必须在AndroidManifest.xml中配置该Activity，否则不能正常调用QQ互联的API <br>
+ * AndroidManifest.xml的配置如下所示：其中“tencent222222”中的222222要替换成对应App的AppId<br>
+ *
+ * <pre>{@code
+ * <activity android:name="com.tencent.tauth.AuthActivity"
+ *      android:noHistory="true" android:launchMode="singleTask" >
+ *         <intent-filter>
+ *             <action android:name="android.intent.action.VIEW" />
+ *             <category android:name="android.intent.category.DEFAULT" />
+ *             <category android:name="android.intent.category.BROWSABLE" />
+ *             <data android:scheme="tencent222222" />
+ *         </intent-filter>
+ * </activity>
+ * }</pre>
+ *
+ * @author azraellong
+ */
+public class AuthActivity extends Activity {
+	public static final String ACTION_KEY = "action";
+	
+    private static final String TAG = SLog.TAG + ".AuthActivity";
+    private static final String ACTION_SHARE_TO_QQ = "shareToQQ";
+    private static final String ACTION_SHARE_TO_QZONE = "shareToQzone";
+    private static final String ACTION_ADD_TO_QQFAVORITES = "addToQQFavorites";
+    private static final String ACTION_SEND_TO_MY_COMPUTER = "sendToMyComputer";
+    
+    private static int mShareQzoneBackTime = 0; //分享到空间回调数据的次数
+    private static final String ACTION_SHARE_TO_TROOP_BAR = "shareToTroopBar";
+    // tencent222222://tauth.qq.com/?#action=sharePrize&response={"ret":0, "activityid":"123"}
+    public static final String ACTION_SHARE_PRIZE = "sharePrize";
+    private static final String SHARE_PRIZE_ACTIVITY_ID = "activityid";
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        if (null == getIntent()) {
+        	SLog.w(TAG, "-->onCreate, getIntent() return null");
+        	finish();
+            return;
+        }
+        
+        Uri uri = null;
+        try { 
+            uri = getIntent().getData();
+        } catch (Exception e) {
+            SLog.e(TAG, "-->onCreate, getIntent().getData() has exception! " + e.getMessage());
+        }
+
+        SLog.v(TAG, "-->onCreate, uri: " + uri);
+        handleActionUri(uri);
+
+    }
+
+    private void handleActionUri(Uri uri){
+    	SLog.i(TAG, "-->handleActionUri--start");
+        if (null == uri || null == uri.toString() || uri.toString().equals("")) {
+        	SLog.w(TAG, "-->handleActionUri, uri invalid");
+            finish();
+            return;
+        }
+        String url = uri.toString();
+        String queryString = url.substring(url.indexOf("#") + 1);
+
+        Bundle bundle = Util.decodeUrl(queryString);
+        if (null == bundle) {
+        	SLog.w(TAG, "-->handleActionUri, bundle is null");
+            finish();
+            return;
+        }
+
+        String action = bundle.getString(ACTION_KEY);
+        SLog.i(TAG, "-->handleActionUri, action: " + action);
+        if(null == action){
+            //execAuthCallback(bundle, url);
+            finish();
+        } else if (action.equals(ACTION_SHARE_TO_QQ) || action.equals(ACTION_SHARE_TO_QZONE)
+        		//|| action.equals(ACTION_ADD_TO_QQFAVORITES)
+                || action.equals(ACTION_SEND_TO_MY_COMPUTER)
+                || action.equals(ACTION_SHARE_TO_TROOP_BAR)) {
+        	/* 
+        	 * 手Q5.2以下版本分享到空间会回调两次，这里做一下特殊处理
+        	 * 手Q不存在时通过网页分享没有这个问题
+        	 */
+        	if (action.equals(ACTION_SHARE_TO_QZONE) 
+        			&& SystemUtils.getAppVersionName(this, Constants.MOBILEQQ_PACKAGE_NAME) != null
+        			&& SystemUtils.compareQQVersion(this, SystemUtils.QQ_VERSION_NAME_5_2_0) < 0) { 
+        		
+        		++mShareQzoneBackTime;
+        		if (mShareQzoneBackTime == 2) {
+        			mShareQzoneBackTime = 0;
+        			finish();
+        			return;
+        		}
+        	}
+        	
+        	SLog.i(TAG, "-->handleActionUri, most share action, start assistactivity");
+        	/*把回调数据打包到AssistActivity中处理*/
+            Intent intent = new Intent(this, AssistActivity.class);
+            intent.putExtras(bundle);
+            intent.setFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            startActivity(intent);
+            finish();
+         } else if (action.equals(ACTION_ADD_TO_QQFAVORITES)) { //收藏单独处理直接回调listener
+            Intent intent = getIntent();
+            intent.putExtras(bundle);
+            intent.putExtra(Constants.KEY_ACTION, SystemUtils.ACTION_SHARE);
+
+            Object object = UIListenerManager.getInstance().getListnerWithAction(action);
+            if (object != null) {
+            	UIListenerManager.getInstance().handleDataToListener(intent, (IUiListener) object);
+            }
+            finish();
+        } else if (action.equals(ACTION_SHARE_PRIZE)) {
+            Intent intent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+
+            String response = bundle.getString("response");
+            JSONObject jsonObject = null;
+            String activityIdValue = "";
+            try {
+                jsonObject = Util.parseJson(response);
+                activityIdValue = jsonObject.getString(SHARE_PRIZE_ACTIVITY_ID);
+            } catch (Exception e) {
+                SLog.e(TAG, "sharePrize parseJson has exception.",e);
+            }
+
+            if (!TextUtils.isEmpty(activityIdValue)) {
+                intent.putExtra(ACTION_SHARE_PRIZE, true);
+                Bundle params = new Bundle();
+                params.putString(SHARE_PRIZE_ACTIVITY_ID, activityIdValue);
+                intent.putExtras(params);
+            }
+            startActivity(intent);
+            finish();
+         } else {
+            //execAuthCallback(bundle, url);
+        	finish();
+        }
+    }
+
+    //接口已不用，屏蔽，解决安全工单问题
+//    private void execAuthCallback(Bundle bundle, String url) {
+//    	SLog.v(TAG, "execAuthCallback url = " + url);
+//        if (null == bundle || null == url) {
+//            finish();
+//            return;
+//        }
+//        AuthMap authMap = AuthMap.getInstance();
+//        String id = bundle.getString("serial");
+//        Auth auth = authMap.get(id);
+//        if (auth != null) {
+//            if (url.indexOf("://cancel") != -1) {
+//                auth.listener.onCancel();
+//                auth.dialog.dismiss();
+//            } else {
+//                String accessToken = bundle.getString("access_token");
+//                if (null != accessToken) {
+//                    bundle.putString("access_token", authMap.decode(accessToken, auth.key));
+//                }
+//                String url1 = Util.encodeUrl(bundle);
+//                JSONObject jsonObject = new JSONObject();
+//                jsonObject = Util.decodeUrlToJson(jsonObject, url1);
+//                String callback = jsonObject.optString("cb");
+//                if (!"".equals(callback)) {
+//                    auth.dialog.callJs(callback, jsonObject.toString());
+//                    // 等待js去关闭dialog
+//                } else {
+//                    auth.listener.onComplete(jsonObject);
+//                    auth.dialog.dismiss();
+//                }
+//            }
+//            authMap.remove(id);
+//        }
+//        finish();
+//    }
+}

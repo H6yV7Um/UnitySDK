@@ -1,0 +1,195 @@
+
+package com.tencent.open;
+
+import android.app.Activity;
+import android.os.Bundle;
+
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.Constants;
+import com.tencent.tauth.IUiListener;
+import com.tencent.open.utils.Util;
+
+/**
+ * 访问腾讯开放平台社交渠道API的入口类
+ * 
+ * @author milesxia
+ */
+public class SocialApi {
+
+    private SocialApiIml mSoApiIml;
+
+    public SocialApi(QQToken token) {
+        mSoApiIml = new SocialApiIml(token);
+    }
+
+    /**
+     * 发送应用邀请<br>
+     * <br>
+     * 启动邀请界面，弹出SDK中openId的QQ好友列表，由用户选择目标好友，确认后向其发送安装本应用的邀请。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送邀请的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_RECEIVER}等
+     * @param listener 回调接口
+     */
+    public void invite(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.invite(activity, params, listener);
+    }
+
+    /**
+     * 发送故事<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送故事的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_APP_ICON}等
+     * @param listener 回调接口
+     */
+    public void story(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.story(activity, params, listener);
+    }
+    
+    /**
+     * 赠送礼物<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成赠送礼物的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void gift(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.gift(activity, params, listener);
+    }
+
+    /**
+     * 发送请求<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送请求的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void ask(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.ask(activity, params, listener);
+    }
+    
+    
+    //-----------------------------------
+    //下面的注释请勿删除，编译lite版的时候需要删除[liteexludestart] [liteexludeend]区间的代码
+    //[liteexludestart]
+    /**
+     * 好友召回<br>
+     * <br>
+     * 启动好友召回界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送请求的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void reactive(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.reactive(activity, params, listener);
+    }
+
+    /**
+     * 向好友炫耀<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送炫耀的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void brag(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.brag(activity, params, listener);
+    }
+
+    /**
+     * 发送挑战<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送挑战的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void challenge(Activity activity, Bundle params, IUiListener listener) {
+        mSoApiIml.challenge(activity, params, listener);
+    }
+    
+    /**
+     * 应用评价<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成应用评价的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_APP_ICON}等
+     * @param listener 回调接口
+     */
+    public void grade(Activity activity, Bundle params, IUiListener listener) {
+        params.putString("version", Util.getAppVersion(activity));
+        mSoApiIml.grade(activity, params, listener);
+    }
+    
+    
+    /**
+     * 发送语音信息<br>
+     * <br>
+     * 启动语音界面，可由用户选择目标好友，录音后确认后向其发送本应用的语音信息。<br>
+     * <br>
+     * 此功能必须安装了指定Qzone版本的API，SDK会优先启用应用中的特定Activity，通过此Activity完成语音的功能。
+     * <br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_VOICE}等
+     * @param listener 回调接口
+     */
+    public void voice(Activity activity, Bundle params, IUiListener listener) {
+        params.putString("version", Util.getAppVersion(activity));
+        mSoApiIml.voice(activity, params, listener);
+    }
+    
+    /**
+     * 检查是否具有语音API能力<br>
+     * <br>
+     * 语音能力没有对应的WebView页面，必须依赖于终端，因此要给用户<br>
+     * <br>
+     * 此功能必须安装了指定Qzone版本的API，SDK会优先启用应用中的特定Activity，通过此Activity完成语音的功能。
+     * <br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link Constants#PARAM_VOICE}等
+     * @param listener 回调接口
+     */
+    public boolean checkVoiceApi(Activity activity, Bundle params, IUiListener listener) {
+        params.putString("version", Util.getAppVersion(activity));
+        mSoApiIml.grade(activity, params, listener);
+        return true;
+    }
+    //[liteexludeend]
+
+}

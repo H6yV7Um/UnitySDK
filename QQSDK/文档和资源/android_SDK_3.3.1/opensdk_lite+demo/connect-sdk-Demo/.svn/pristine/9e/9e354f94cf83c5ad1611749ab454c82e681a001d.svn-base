@@ -1,0 +1,261 @@
+<?xml version="1.0" ?>
+<project name="build_common_sdk" default="" basedir=".">
+
+	<!-- ######属性定义部分###### -->
+	<!-- 时间戳属性定义，用于包的文件名 -->
+	<tstamp>
+		<format property="build_date" pattern="yyyyMMddHHmmss" />
+		<format property="build_number" pattern="yyyyMMdd" />
+	</tstamp>
+
+	<!-- 项目的目录属性定义 -->
+	<property name="sdk_src" value="${sdk_project_path}/src" />
+	<!-- 源代码 -->
+	<property name="sdk_res" value="${sdk_project_path}/res" />
+	<!-- 资源 -->
+	<property name="sdk_lib" value="${sdk_project_path}/libs" />
+	<!-- 库 -->
+	<property name="sdk_libs" value="${sdk_project_path}/libs" />
+	<!-- .so库 -->
+	<property name="sdk_assets" value="${sdk_project_path}/assets" />
+	<!-- assets -->
+	<property name="sdk_bin" value="${sdk_project_path}/bin" />
+	<!-- 包目录 -->
+	<property name="sdk_classes" value="${sdk_project_path}/classes" />
+	<!-- classes -->
+	<property name = "code_dog_sdk_classes" value="${basedir}/codedog/sdkclasses" />
+	<!-- codedog sdk classes-->
+	<property name="sdk_gen" value="${sdk_bin}/gen" />
+	<!-- 生成R.java -->
+	<property name="testlib" value="AutoTest/libs" />
+	<!-- 测试 -->
+	<!-- <property name="testresult" value="${jar_path}" /> -->
+	<!-- 测试 -->
+	<property name="sampledir" value="${sample_project_path}/libs" />
+
+	<!-- 编码设置 -->
+	<property name="encoding" value="UTF-8" />
+
+	<property name="file_name_for_sample" value="${file_name_prefix_for_sample}" />
+
+	<!-- Android framework定义 -->
+	<property name="android_framework" value="${android_home}/platforms/android-19/framework.aidl" />
+	<property name="dex" value="${sdk_bin}/classes.dex" />
+
+	<!-- 工具属性定义 -->
+	<property name="aapt" value="${android_home}/build-tools/19.1.0/aapt" />
+	<property name="aidl" value="${android_home}/build-tools/19.1.0/aidl" />
+	<property name="adb" value="${android_home}/platform-tools/adb" />
+	<property name="dx" value="${android_home}/build-tools/19.1.0/dx${bat}" />
+	<property name="apkbuilder" value="${android_home}/tools/apkbuilder${bat}" />
+	<!--待确认-->
+	<property name="androidjar" value="${android_home}/platforms/android-19/android.jar" />
+	
+	<property name="insertLogPath"
+		value="${basedir}/script/precise_insert_log/Business/QQconnect" /> <!-- 插桩工具 -->
+	
+	<!-- 为该项目代码的函数打上log -->
+	<target name="insertlog"  if = "${isAccurateTest}">
+		<echo>为项目插入log</echo>
+		<echo>python ${insertLogPath}/insertLog_QQ.py ${ws}/sourse</echo>
+		<exec executable="python" failonerror="true">
+			<arg value="${insertLogPath}/insertLog_QQ.py" />
+			<arg value="${sdk_project_path}" />
+		</exec>
+	</target>
+	
+
+	<!-- ###### Target定义部分 ###### -->
+	<!-- 初始化目录 -->
+	<target name="init_sdk">	
+		<echo>如果bin和lib目录不存在，则创建</echo>
+		<mkdir dir="${sdk_bin}" />
+		<mkdir dir="${sdk_lib}" />
+		<mkdir dir="${sdk_libs}" />
+		<echo>
+			清空bin和classes目录
+		</echo>
+			<delete includeemptydirs="true" verbose="true" failonerror="false">
+			    <fileset dir="${output_path}" includes="**/**" />
+			</delete>
+		<delete dir="${sdk_classes}" />
+		<delete dir = "${code_dog_sdk_classes}" /> <!-- delete codedog sdk classes-->
+		<delete>
+		    <fileset dir="${sdk_bin}" includes="**/**" />
+		</delete>
+		<mkdir dir="${sdk_classes}" />
+		<mkdir dir= "${code_dog_sdk_classes}" /> <!-- mkdir codedog sdk classes-->
+		<mkdir dir="${sdk_gen}" />
+	</target>
+	
+	<!-- 初始化目录 -->
+	<target name="init_insertlpg_sdk">	
+		<echo>如果bin和lib目录不存在，则创建</echo>
+		<mkdir dir="${sdk_bin}" />
+		<mkdir dir="${sdk_lib}" />
+		<mkdir dir="${sdk_libs}" />
+		<echo>
+			清空bin和classes目录
+		</echo>
+		<delete dir="${sdk_classes}" />
+		<delete>
+		    <fileset dir="${sdk_bin}" includes="**/**" />
+		</delete>
+		<mkdir dir="${sdk_classes}" />
+		<mkdir dir="${sdk_gen}" />
+	</target>
+
+
+	<!-- 为该项目资源生成R.java文件 -->
+	<target name="generate_sdk">
+		<echo>Generating R.java / Manifest.java from the resources...</echo>
+		<exec executable="${aapt}" failonerror="true">
+			<arg value="package" />
+			<arg value="-m" />
+			<arg value="-J" />
+			<arg value="${sdk_gen}" />
+			<arg value="-M" />
+			<arg value="${sdk_project_path}/AndroidManifest.xml" />
+			<arg value="-S" />
+			<arg value="${sdk_res}" />
+			<arg value="-I" />
+			<arg value="${androidjar}" />
+		</exec>
+	</target>
+	
+	<!-- 编译项目的.java文件为.class文件 -->
+	<target name="compile_sdk">
+		<echo>开始编译...</echo>
+		<javac encoding="${encoding}" debug="true" extdirs="" source="1.6" target="1.6" destdir="${sdk_classes}" bootclasspath="${androidjar}"  includeantruntime="on">
+			<src path="${sdk_src}" />
+			<src path="${sdk_gen}" />
+			<classpath>
+				<fileset dir="${sdk_lib}" includes="*.jar" />
+				<fileset dir="${sdk_project_path}/extralib" includes="annotations.jar" />
+			</classpath>
+		</javac>
+		<!-- 将soso地图jar文件解压为.class文件，二次打包进sdk -->
+		<unzip src="${sdk_lib}/sosomap-lbsapi-v1.8.jar" dest="${sdk_classes}" />
+		<echo>结束编译...</echo>
+		<echo>开始拷贝sdk classes...</echo>
+		<copy todir="${code_dog_sdk_classes}" filtering="true">
+			<fileset dir="${sdk_classes}">
+				<include name="**/*" />
+			</fileset>
+		</copy>
+		<echo>结束拷贝sdk classes...</echo>
+	</target>
+
+	<!-- 打包 -->
+	<target name="package_sdk">
+		<jar basedir="${sdk_classes}" destfile="temp.jar">
+		     <fileset dir="${sdk_project_path}">
+		         <include name="assets/*" />
+		     </fileset>
+		</jar>
+	</target>
+
+	<!-- 对打包后的结果进行混淆 -->
+	<target name="obfuscate_sdk">
+		<java jar="${proguard_home}/lib/proguard.jar" fork="true" failonerror="true">
+			<jvmarg value="-Dmaximum.inlined.code.length=32" />
+			
+			<!-- 保证不同业务混淆后类名冲突 -->
+			<arg value="-keeppackagenames com.tencent.open"/>
+			<arg value="-keeppackagenames com.tencent.connect"/>
+			<arg value="-keeppackagenames com.tencent.map"/>
+			
+			<arg value="-injars temp.jar" />
+			<arg value="-outjars obfuscated.jar" />
+			<arg value="-libraryjars ${androidjar}" />
+			<arg value="-libraryjars ${sdk_lib}" />
+			<arg value="-libraryjars ${sdk_project_path}/extralib/annotations.jar" />
+
+			<!-- <arg value="-dontpreverify"/> -->
+			<arg value="-dontoptimize" />
+			<arg value="-dontusemixedcaseclassnames" />
+			<arg value="-keepattributes Exceptions,InnerClasses,Signature,Deprecated,SourceFile,LineNumberTable,*Annotation*,EnclosingMethod"/>
+			
+			<arg value="-keep class com.tencent.connect.dataprovider.* {public *;}"/>
+			<arg value="-keep class com.tencent.connect.dataprovider.datatype$* {*;}"/>
+			<arg value="-keep class com.tencent.qqconnect.dataprovider.datatype.* {public *;}" />
+			
+			<arg value="-keepclasseswithmembernames class * extends com.tencent.connect.common.BaseApi{public &lt;methods&gt;;}" />
+			<arg value="-keepclasseswithmembernames class * extends com.tencent.connect.common.BaseApi{public *;}" />
+			
+			<arg value="-keep class * extends com.tencent.connect.common.BaseApi{public *;}"/>
+			
+			<arg value="-keepnames class com.tencent.open.qzone.Albums$* {public *;}"/>
+			<arg value="-keepnames class com.tencent.open.qzone.Albums.AlbumSecurity {*;}"/>
+			
+			<arg value="-keep class com.tencent.open.weiyun.FileManager$* {*;}"/>
+			<arg value="-keepnames class com.tencent.open.weiyun.FileManager$* {public *;}"/>
+	
+			<arg value="-keep class com.tencent.connect.common.* {*;}"/>
+			<arg value="-keep class com.tencent.connect.UserInfo{public *;}"/>
+			<arg value="-keep class com.tencent.connect.auth.* {public *;}"/>
+			
+			<arg value="-keep class com.tencent.open.utils.*{public *;}"/>
+			
+			<arg value="-keep class com.tencent.open.weiyun.*{public *;}"/>
+			<arg value="-keep class com.tencent.open.weiyun.FileManager.WeiyunFileType"/>
+			
+			<arg value="-keep class com.tencent.open.SocialApi{public *;}"/>
+			<arg value="-keep class com.tencent.open.SocialConstants {*;}"/>
+			<arg value="-keep class com.tencent.open.TDialog$*"/>
+			<arg value="-keep class com.tencent.open.TDialog$* {*;}"/>
+						
+			<arg value="-keep class com.tencent.open.PKDialog"/>
+			<arg value="-keep class com.tencent.open.PKDialog {*;}"/>
+			<arg value="-keep class com.tencent.open.PKDialog$*"/>
+			<arg value="-keep class com.tencent.open.PKDialog$* {*;}"/>
+			
+			<arg value="-keep class com.tencent.open.ServerSetting"/>
+			<arg value="-keep class com.tencent.open.ServerSetting {*;}"/>
+			
+			<arg value="-keep class com.tencent.open.yyb.AppbarActivity {*;}" />
+			<arg value="-keep class com.tencent.open.yyb.MoreFloatingDialog {*;}" />
+			<arg value="-keep class com.tencent.open.yyb.TitleBar {*;}" />
+			<arg value="-keep class com.tencent.open.yyb.AppbarJsBridge {public *;}" />
+			<arg value="-keep class com.tencent.open.yyb.AppbarAgent {public *;}" />
+			
+			<!-- <arg value="-keep class com.tencent.open.*" />
+			<arg value="-keep class com.tencent.open.* {*;}" />  -->
+			<arg value="-keep class com.tencent.tauth.*" />
+			<arg value="-keep class com.tencent.tauth.* {*;}" />
+			
+			<arg value="-keep class com.tencent.open.web.security.SecureJsInterface {public *;} " />
+			<arg value="-keep class com.tencent.open.web.security.JniInterface {public *;} " />
+			
+			<arg value="-keepattributes InnerClasses" />
+
+			<arg value="-keep class * implements android.os.Parcelable {public static final android.os.Parcelable$Creator *;}"/>
+			<arg value="-printmapping mappingfile.txt" />
+			<!-- <arg value="-optimizationpasses 7"/>  -->
+			<arg value="-verbose" />
+			<arg value="-dontskipnonpubliclibraryclasses" />
+			<arg value="-dontskipnonpubliclibraryclassmembers" />
+			<arg value="-printmapping ${sdk_bin}/mapping.txt" />
+			<arg value="-renamesourcefileattribute ProGuard" />
+			<arg value="-keepattributes SourceFile,LineNumberTable" />
+		</java>
+		<delete file="temp.jar" />
+		<delete dir="${sdk_classes}" />
+	</target>
+
+	<!-- 拷贝apk到测试目录 -->
+	<target name="copy_to_testdir_sdk">
+		<copy file="${sdk_bin}/mapping.txt" tofile="${output_path}/sdk_mapping.txt" />
+		<copy file="obfuscated.jar" tofile="${output_path}/${sdk_file_name}.jar" />
+		<copy file="obfuscated.jar" tofile="${sampledir}/${sdk_file_name}.jar" />
+		<delete file="obfuscated.jar" />
+	</target>
+	
+	<!-- 拷贝插桩jar到测试目录 -->
+	<target name="copy_insertlog_jar_to_testdir_sdk">
+		<copy file="${sdk_bin}/mapping.txt" tofile="${output_path}/sdk_mapping.txt" />
+		<copy file="obfuscated.jar" tofile="${output_path}/${sdk_file_name}_insertlog.jar" />
+		<copy file="obfuscated.jar" tofile="${sampledir}/${sdk_file_name}_insertlog.jar" />
+		<delete file="obfuscated.jar" />
+	</target>
+</project>

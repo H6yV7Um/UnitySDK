@@ -1,0 +1,298 @@
+
+package com.tencent.open.utils;
+
+import java.io.BufferedReader;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
+import java.nio.charset.Charset;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.content.Context;
+import android.os.Bundle;
+import android.os.SystemClock;
+
+import com.tencent.connect.common.Constants;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Util.Statistic;
+
+public class OpenConfig {
+    //Configuration keys
+    public static final String Key_WebLogin = "C_LoginWeb";//是否默认通过web登录授权
+    //
+    private static final String CONFIG_FILENAME = "com.tencent.open.config.json";
+
+    private static final String CONFIG_URL = "http://cgi.connect.qq.com/qqconnectopen/openapi/policy_conf";
+
+    private static final String TAG = SLog.TAG + ".OpenConfig";
+
+    private static Map<String,OpenConfig> configMap = Collections.synchronizedMap(new HashMap<String, OpenConfig>());
+
+    private static String lastAppId = null;
+
+    private Context appContext = null;
+
+    private String appId = null;
+
+    private JSONObject config = null;
+
+    private long updateTimestamp = 0;
+
+    private int updateStatus = 0;
+
+    private boolean debug = true;
+
+    /**
+     * 获取OpenConfig的实例, 这是个单例 <br>
+     */
+    public static OpenConfig getInstance(Context appContext, String appId) {
+    	synchronized (configMap) {
+    		SLog.v(TAG,"getInstance begin");
+    		if(null != appId){
+                lastAppId = appId;
+            }
+            if (null == appId) {
+                if(null != lastAppId){
+                    appId = lastAppId;
+                }else{
+                    appId = "0";// 默认配置的appid为0
+                }
+            }
+            OpenConfig instance = configMap.get(appId);
+            if (null == instance) {
+                instance = new OpenConfig(appContext, appId);
+                configMap.put(appId, instance);
+            }
+            SLog.v(TAG,"getInstance end");
+            return instance;
+		}      
+    }
+
+    private OpenConfig(Context appContext, String appId) {
+        this.appContext = appContext.getApplicationContext();
+        this.appId = appId;
+        this.init();
+        this.update();
+
+    }
+
+    /**
+     * 初始化本地配置, 从本地读取
+     */
+    private void init() {
+        String fileContent = readFile(CONFIG_FILENAME);
+        try {
+            config = new JSONObject(fileContent);
+        } catch (JSONException e) {
+            config = new JSONObject();
+        }
+    }
+
+    /**
+     * 从程序私有目录或者 assets 目录读取指定文件, 并转换为字符串返回<br>
+     * 当私有目录不存在改文件, 则去assets目录读取
+     *
+     * @param fileName
+     * @return
+     */
+    private String readFile(String fileName) {
+        InputStream inputStream = null;
+        BufferedReader bufferedReader = null;
+        String result = "";
+        try {
+            String appFileName;
+            if (null != appId) {
+                appFileName = fileName + "." + appId;
+            } else {
+                appFileName = fileName;
+            }
+            // 先去 app files 目录找
+            inputStream = appContext.openFileInput(appFileName);
+        } catch (FileNotFoundException fnfe) {
+            try {// app files 目录下没找到, 去 assets 里面找
+                inputStream = appContext.getAssets().open(fileName);
+            } catch (IOException e) {
+                e.printStackTrace();
+                return result;
+            }
+        }
+        bufferedReader = new BufferedReader(new InputStreamReader(inputStream, Charset.forName("UTF-8")));
+        StringBuffer buffer = new StringBuffer();
+        String line = null;
+        try {
+            while (null != (line = bufferedReader.readLine())) {
+                buffer.append(line);
+            }
+            result = buffer.toString();
+        } catch (IOException e) {
+            e.printStackTrace();
+        } finally {
+            try {
+                inputStream.close();
+                bufferedReader.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+        return result;
+    }
+
+    /**
+     * 写文件的程序私有目录
+     *
+     * @param fileName
+     * @param content
+     */
+    private void writeFile(String fileName, String content) {
+        try {
+            String appFileName;
+            if (null != appId) {
+                appFileName = fileName + "." + appId;
+            } else {
+                appFileName = fileName;
+            }
+            FileOutputStream fileOutputStream = appContext.openFileOutput(
+                    appFileName, Context.MODE_PRIVATE);
+
+            OutputStreamWriter osWriter = new OutputStreamWriter(fileOutputStream, Charset.forName("UTF-8"));
+            osWriter.write(content);
+            osWriter.flush();
+            osWriter.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    /**
+     * 发起更新请求
+     */
+    private void update() {
+        if (0 != updateStatus) {
+            // status 的值不为0, 表示上一个请求还未返回, 防止发多次
+            log("update thread is running, return");
+            return;
+        }
+        updateStatus = 1;// loading
+        final Bundle params = new Bundle();
+        params.putString("appid", appId);
+        params.putString("appid_for_getting_config", appId);
+        params.putString("status_os", android.os.Build.VERSION.RELEASE);
+        params.putString("status_machine", android.os.Build.MODEL);
+        params.putString("status_version", android.os.Build.VERSION.SDK);
+        params.putString("sdkv", Constants.SDK_VERSION);
+        params.putString("sdkp", "a");
+
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    Statistic stat = HttpUtils.openUrl2(appContext, CONFIG_URL, Constants.HTTP_GET,
+                            params);
+                    String response = stat.response;
+                    // //TODO for test
+                    // response = "{\n"+
+                    // "\"sys_browser_enable\": 1,\n"+
+                    // "\"webview_enable\": 1,\n"+
+                    // "\"ta_enable\": 1,\n"+
+                    // "\"frequency\": 24\n"+
+                    // "}";
+                    JSONObject result = Util.parseJson(response);
+                    doUpdate(result);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+                updateStatus = 0;
+            }
+        }.start();
+    }
+
+    /**
+     * 把获取的新配置保存到文件
+     *
+     * @param config
+     */
+    private void doUpdate(JSONObject newConfig) {
+        log("cgi back, do update");
+        config = newConfig;
+        writeFile(CONFIG_FILENAME, newConfig.toString());
+        updateTimestamp = SystemClock.elapsedRealtime();
+    }
+
+    /**
+     * 检查是否要进行更新
+     */
+    private void check() {
+        int frequency = config.optInt("Common_frequency");
+        if (0 == frequency) {// 如果后台出错了, 返回的frequency是0, 这里把它改为1, 最少1小时
+            frequency = 1;
+        }
+        long frequency2 = frequency * 3600000;
+        long current = SystemClock.elapsedRealtime();
+        // log("check update");
+        if (current - updateTimestamp >= frequency2) {
+            // 时间到了, 更新
+            this.update();
+        }
+    }
+
+    /**
+     * 获取一个整型数字, 不存在则返回0
+     *
+     * @param key
+     * @return key的值
+     */
+    public int getInt(String key) {
+        log("get " + key);
+        this.check();
+        return config.optInt(key);
+    }
+
+    /**
+     * 获取一个长整型数字, 不存在则返回0
+     *
+     * @param key
+     * @return key的值
+     */
+    public long getLong(String key) {
+        log("get " + key);
+        this.check();
+        return config.optLong(key);
+    }
+
+    /**
+     * 获取一个布尔值, 不存在则返回false <br>
+     * 如果该值是整型, 则0转换为false, 其他值转换为 true
+     *
+     * @param key
+     * @return key的值或者false
+     */
+    public boolean getBoolean(String key) {
+        log("get " + key);
+        this.check();
+        Object value = config.opt(key);
+        if (null == value) {
+            return false;
+        } else if (value instanceof Integer) {
+            return !value.equals(0);
+        } else if (value instanceof Boolean) {
+            return (Boolean) value;
+        } else {
+            return false;
+        }
+    }
+
+    private void log(String msg) {
+        if (debug) {
+            SLog.v(TAG, msg + "; appid: " + appId);
+        }
+    }
+
+}

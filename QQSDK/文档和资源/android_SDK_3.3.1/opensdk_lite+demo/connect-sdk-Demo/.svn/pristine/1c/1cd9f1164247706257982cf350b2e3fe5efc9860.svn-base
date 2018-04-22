@@ -1,0 +1,1075 @@
+package com.tencent.open;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.MalformedURLException;
+import java.net.SocketTimeoutException;
+import org.apache.http.conn.ConnectTimeoutException;
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Context;
+import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.NinePatch;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.NinePatchDrawable;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.SystemClock;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.ViewConfiguration;
+import android.view.ViewGroup;
+import android.view.WindowManager;
+import android.view.View.OnClickListener;
+import android.view.ViewGroup.LayoutParams;
+import android.view.animation.AccelerateInterpolator;
+import android.view.animation.Interpolator;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.tauth.IRequestListener;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.HttpUtils.HttpStatusException;
+import com.tencent.open.utils.HttpUtils.NetworkUnavailableException;
+
+import android.graphics.PixelFormat;
+
+public class TaskGuide extends BaseApi {
+
+    private static final String TAG = SLog.TAG + ".TaskGuide";
+	private static final String CGI_APP_GRADE_URI = "http://appact.qzone.qq.com/appstore_activity_task_pcpush_sdk";
+	//private static final String CGI_APP_GET_REWARD_URI = "http://appact.qzone.qq.com/appstore_activity_task_pcpush";
+
+    private WindowManager.LayoutParams mWinParams = null;
+    private ViewGroup mContentView = null;
+    private WindowManager wm;
+	private Handler mHandler = new Handler(Looper.getMainLooper());
+	private TaskInfo mTaskInfo;
+
+	private TaskState mState1 = TaskState.INIT;   //第一个任务的状态
+	private TaskState mState2 = TaskState.INIT;   //第二个任务的状态
+	//private TaskState mState = TaskState.INIT;   //第二个任务的状态
+
+	private static Drawable sBackground;
+	private static Drawable sButtonGreen;
+	private static Drawable sButtonRed;
+
+	private static int BACKGROUND_HEIGHT = 75;  //单位 ： dp
+	private static int BACKGROUND_WIDTH = 284;  //单位 ： dp
+	//private static int BACKUP_MARGIN_LEFT = 18;  //单位 ： dp
+	private static int BUTTON_WIDTH = 75;  //单位 ： dp
+	private static int BUTTON_HEIGHT = 30;  //单位 ： dp
+	private static int BUTTON_MARGIN_RIGHT = 29;  //单位 ： dp
+	private static int BUTTON_MARGIN_TOP = 5;  //单位 ： dp
+
+	private static int REWARD_TEXT_WIDTH = 74;  //单位 ： dp
+	private static int REWARD_MARGIN_TOP = 0;  //单位 ： dp
+	private static int REWARD_TEXT_SIZE = 6;  //单位 ： dp
+
+
+
+	private static int TIPTEXT_WIDTH = 153; //单位： dp
+	private static int TIPTEXT_MARGIN_LEFT = 30; //单位： dp
+
+	private static int TIPTEXT_TEXT_SIZE = 6; //单位：dp
+	private static int SUBTEXT_MARGIN_TOP = 3; //单位：dp
+
+	private  int sScreenWidth = 0;
+	private  int sScreenHeight =0;
+	private  float sDensity = 0;
+	private Interpolator mInterpolator = new AccelerateInterpolator();
+
+	private boolean mAddedWindow = false;
+	private Context mContext;
+
+	public TaskGuide(Context context, QQToken token) {
+		super(token);
+		mContext = context;
+		wm = (WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
+		initDisplay();
+	}
+
+
+    public TaskGuide(Context context, QQAuth qqAuth, QQToken token) {
+        super(qqAuth, token);
+        mContext = context;
+        wm = (WindowManager)context.getSystemService(Context.WINDOW_SERVICE);
+
+        initDisplay();
+    }
+
+
+    private void initDisplay() {
+        DisplayMetrics metric = new DisplayMetrics();
+        wm.getDefaultDisplay().getMetrics(metric);
+        sScreenWidth = metric.widthPixels;
+        sScreenHeight = metric.heightPixels;
+        sDensity = metric.density;  // 屏幕密度（0.75 / 1.0 / 1.5）
+    }
+
+	private WindowManager.LayoutParams genearteWinParams(Context context) {
+
+    	WindowManager.LayoutParams layoutParam = new WindowManager.LayoutParams();
+
+    	layoutParam.gravity=Gravity.CENTER_HORIZONTAL|Gravity.TOP;
+
+//    	layoutParam.x=0;
+//    	layoutParam.y=0;
+
+    	int screenWidth = wm.getDefaultDisplay().getWidth();
+    	int screenHeight = wm.getDefaultDisplay().getHeight();
+
+    	layoutParam.width= getDimenDp2Px(BACKGROUND_WIDTH);
+
+    	layoutParam.height = getDimenDp2Px(BACKGROUND_HEIGHT);
+
+    	layoutParam.windowAnimations = android.R.style.Animation_Dialog;
+    	layoutParam.format = PixelFormat.RGBA_8888;   //背景透明
+
+    	//layoutParam.y = 0;
+
+
+    	layoutParam.flags |= (WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS /* | WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR */);
+    	layoutParam.type = WindowManager.LayoutParams.TYPE_APPLICATION;
+
+    	mWinParams = layoutParam;
+    	return layoutParam;
+    }
+
+	private void retWinParams() {
+		if(mWinParams != null) {
+			mWinParams.y = -mWinParams.height;
+		}
+	}
+
+
+
+	/**  适配各种分辨率，用dp为单位指定尺寸
+	 * @param dpDimen
+	 * @returnint
+	 */
+	private int getDimenDp2Px(int dpDimen) {
+
+        return (int)(dpDimen * sDensity);
+	}
+
+
+	private static final int TIP_TX_ID = 1;
+	private static final int BUTTON_ID = 2;
+	private static final int REWARD_TX_ID = 3;
+	private static final int SUB_TIP_TX_ID = 4;
+
+	private ViewGroup createNewContentView(Context context) {
+		QQRelativeLayout contentView = new QQRelativeLayout(context);
+		StepInfo[] stepArray = mTaskInfo.stepInfoArray;
+		if (stepArray.length == 1) { //只有一条任务
+			TaskLinearLayout taskView = new TaskLinearLayout(context,stepArray[0]);
+			taskView.setId(1);
+			RelativeLayout.LayoutParams taskParam =  new RelativeLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+			taskParam.addRule(RelativeLayout.CENTER_VERTICAL);
+			contentView.addView(taskView, taskParam);
+		} else {
+			TaskLinearLayout taskView1 = new TaskLinearLayout(context,stepArray[0]);
+			taskView1.setId(1);
+			TaskLinearLayout taskView2 = new TaskLinearLayout(context,stepArray[1]);
+			taskView2.setId(2);
+			RelativeLayout.LayoutParams taskParam1 =  new RelativeLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+			taskParam1.addRule(RelativeLayout.CENTER_HORIZONTAL);
+			taskParam1.setMargins(0, getDimenDp2Px(6), 0, 0);
+
+
+			RelativeLayout.LayoutParams taskParam2 =  new RelativeLayout.LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+			taskParam2.addRule(RelativeLayout.CENTER_HORIZONTAL);
+			taskParam2.setMargins(0, getDimenDp2Px(4), 0, 0);
+			taskParam2.addRule(RelativeLayout.BELOW, 1);  //第二个在第一个的下面
+			taskParam2.addRule(RelativeLayout.ALIGN_LEFT, 1);
+
+			contentView.addView(taskView1, taskParam1);
+			contentView.addView(taskView2, taskParam2);
+		}
+        Drawable background = getBackgroundDrawable();
+        contentView.setBackgroundDrawable(background);
+		return contentView;
+
+	}
+
+
+
+	private Drawable getBackgroundDrawable() {
+		if (sBackground == null) {
+			sBackground = getDrawable("background.9.png", mContext);
+		}
+		return sBackground;
+	}
+
+	private Drawable getButtonGreen() {
+		if (sButtonGreen == null) {
+			sButtonGreen = getDrawable("button_green.9.png", mContext);
+		}
+		return sButtonGreen;
+	}
+
+	private Drawable getButtonRed() {
+		if (sButtonRed == null) {
+			sButtonRed = getDrawable("button_red.9.png", mContext);
+		}
+		return sButtonRed;
+	}
+
+	private void updateContentView(final int index) { // 0:第一个任务， 1：第二个任务， 2： 两个任务
+		if(mHandler != null) {
+			mHandler.post(new Runnable() {
+
+				@Override
+				public void run() {
+					if (mAddedWindow) {
+						if (index == 0) {
+							TaskLinearLayout taskView1 = (TaskLinearLayout)mContentView.findViewById(1);
+							taskView1.updateView(mState1);
+						} else if (index == 1) {
+							TaskLinearLayout taskView2 = (TaskLinearLayout)mContentView.findViewById(2);
+							taskView2.updateView(mState2);
+						} else if (index == 2) {
+							TaskLinearLayout taskView1 = (TaskLinearLayout)mContentView.findViewById(1);
+							taskView1.updateView(mState1);
+							if (mContentView.getChildCount() > 1) {
+								TaskLinearLayout taskView2 = (TaskLinearLayout)mContentView.findViewById(2);
+								taskView2.updateView(mState2);
+							}
+						}
+					}
+				}
+
+			});
+		}
+	}
+
+
+    private enum TaskState{
+    	INIT,
+    	WAITTING_BACK_TASKINFO,  //等待获取任务信息的网络请求返回
+    	WAITTING_BACK_REWARD,    //等待领取奖励网络请求返回
+    	NORAML,
+    	REWARD_SUCCESS,
+    	REWARD_FAIL
+
+    };
+
+    private void moveToState(int index, TaskState newState) {
+    	if (index == 0) {
+    		mState1 = newState;
+    	} else if (index == 1){
+    		mState2 = newState;
+    	} else {
+    		mState1 = newState;
+    		mState2 = newState;
+    	}
+
+    }
+
+	class RewardOnClickListener implements OnClickListener {
+
+		int index;  //即step_no
+
+		public RewardOnClickListener(int index) {
+			this.index = index;
+		}
+
+		@Override
+		public void onClick(View arg0) {
+			Button button = (Button)arg0;
+			//Toast.makeText(mContext, "按键按下", Toast.LENGTH_SHORT).show();
+			if(getState(index) == TaskState.NORAML) {
+				getGift(index);
+				updateContentView(index);
+			}
+			cancelAutoAnimation();
+		}
+
+	};
+
+	private TaskState getState(int index) {
+		if (index == 0) {
+			return mState1;
+		} else if (index == 1) {
+			return mState2;
+		} else {
+			return TaskState.INIT;
+		}
+	}
+
+    /** 创建 领取奖励提醒窗口
+     * @param context
+     * @returnWindow
+     */
+    @SuppressLint("ResourceAsColor")
+	public void showWindow() {
+    	Handler handler = new Handler(Looper.getMainLooper());
+
+    	handler.post(new Runnable() {
+
+			@Override
+			public void run() {
+
+				mContentView  = createNewContentView(mContext);
+
+
+				mWinParams = genearteWinParams(mContext);
+
+
+				retWinParams();
+		       	WindowManager wm = (WindowManager)mContext.getSystemService(Context.WINDOW_SERVICE);
+
+		       	if(((Activity)mContext).isFinishing()) {
+		    		return;
+		    	}
+
+		       	if (!mAddedWindow) {
+		    		wm.addView(mContentView, mWinParams);
+		    	}
+
+		    	mAddedWindow = true;
+		    	updateContentView(2);
+		    	expandWindow();
+			}
+
+    	});
+
+
+    	TencentStat.trackCustomEvent(mContext, mToken, "TaskApi", "showTaskWindow");
+
+    }
+
+    private class TaskLinearLayout extends LinearLayout {
+
+		public TaskLinearLayout(Context context,StepInfo stepInfo) {
+			super(context);
+			this.stepInfo = stepInfo;
+			this.setOrientation(LinearLayout.HORIZONTAL);
+			createChildView();
+		}
+
+		public void setStepInfo(StepInfo stepInfo) {
+			this.stepInfo = stepInfo;
+		}
+
+		private TextView taskTextView;
+		private Button   rewardButton;
+		private StepInfo stepInfo;
+		private void createChildView() {
+			taskTextView = new TextView(mContext);
+			taskTextView.setTextColor(Color.rgb(255, 255, 255));
+			taskTextView.setTextSize(/*getDimenDp2Px(TaskGuide.TIPTEXT_TEXT_SIZE)*/15);
+			taskTextView.setShadowLayer(1, 1, 1, Color.rgb(242,211,199));
+			taskTextView.setGravity(Gravity.LEFT);
+			taskTextView.setEllipsize(TextUtils.TruncateAt.END);
+			taskTextView.setIncludeFontPadding(false);
+			taskTextView.setSingleLine(true);
+
+			LinearLayout.LayoutParams taskParams = new LinearLayout.LayoutParams( 0/*getDimenDp2Px(TIPTEXT_WIDTH)*/, android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+			taskParams.weight = 1.0f;
+			taskParams.leftMargin = getDimenDp2Px(4);
+			this.addView(taskTextView,taskParams);
+
+			rewardButton = new Button(mContext);
+			rewardButton.setPadding(0, 0, 0, 0);
+			rewardButton.setTextSize(16);
+			rewardButton.setTextColor(Color.rgb(255, 255, 255));
+			rewardButton.setShadowLayer(1, 1, 1, Color.rgb(242,211,199));
+			rewardButton.setIncludeFontPadding(false);
+
+			rewardButton.setOnClickListener(new RewardOnClickListener(stepInfo.stepNumber));
+			LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(getDimenDp2Px(TaskGuide.BUTTON_WIDTH),getDimenDp2Px(TaskGuide.BUTTON_HEIGHT));
+			buttonParams.leftMargin = getDimenDp2Px(2);
+			buttonParams.rightMargin = getDimenDp2Px(8);
+			this.addView(rewardButton, buttonParams);
+
+		}
+
+		public void updateView(TaskState state) {
+			if (!TextUtils.isEmpty(stepInfo.stepDesc)) {
+				taskTextView.setText(stepInfo.stepDesc);
+			}
+
+    		switch(state) {
+				case INIT:
+					rewardButton.setEnabled(false); //动画过程不可点击
+					break;
+
+				case NORAML:
+					//tipTextView.setText(mTaskInfo.taskDesc);
+					//subTextView.setText(mTaskInfo.taskDesc);
+
+					if (stepInfo.status == 1) {
+						rewardButton.setText(stepInfo.stepGift);
+						rewardButton.setBackgroundDrawable(null);
+						rewardButton.setTextColor(Color.rgb(255, 246, 0));
+						rewardButton.setEnabled(false);
+					} else if (stepInfo.status == 2) {
+						rewardButton.setText("领取奖励");
+						rewardButton.setTextColor(Color.rgb(255, 255, 255));
+						rewardButton.setBackgroundDrawable(getButtonGreen());
+						rewardButton.setEnabled(true);
+					}
+
+					break;
+				case WAITTING_BACK_REWARD:
+					rewardButton.setText("领取中...");
+					rewardButton.setEnabled(false);
+					break;
+				case REWARD_SUCCESS:
+					rewardButton.setText("已领取");
+					rewardButton.setBackgroundDrawable(getButtonRed());
+					rewardButton.setEnabled(false);
+					break;
+
+    		}
+
+
+
+		}
+
+    }
+
+
+    private class QQRelativeLayout extends RelativeLayout {
+
+		public QQRelativeLayout(Context context) {
+			super(context);
+			// TODO Auto-generated constructor stub
+		}
+
+		int startY = 0;
+
+
+
+		@Override
+		public boolean onInterceptTouchEvent(MotionEvent ev) {
+			// TODO Auto-generated method stub
+			int currentY = (int)ev.getY();
+			SLog.v(TAG,"onInterceptTouchEvent-- action = "+ev.getAction() +  "currentY = "+currentY );
+			autoCollapseWindow(3000);
+			switch (ev.getAction()) {
+			case MotionEvent.ACTION_DOWN:
+				startY = currentY;
+				return false;
+
+			case MotionEvent.ACTION_UP:
+				if ((startY - currentY) > 2*ViewConfiguration.getTouchSlop()) {
+					collapseWindow();
+					return true;
+				}
+
+			}
+			return super.onInterceptTouchEvent(ev);
+		}
+
+
+
+		@Override
+		public boolean onTouchEvent(MotionEvent event) {
+			// TODO Auto-generated method stub
+			super.onTouchEvent(event);
+			boolean result = false;
+			int currentY = (int)event.getY();
+			SLog.d(TAG," onTouchEvent-----startY = " + startY + "currentY = "+currentY );
+
+
+			switch (event.getAction()) {
+				case MotionEvent.ACTION_DOWN:
+					startY = currentY;
+
+					break;
+				case MotionEvent.ACTION_MOVE:
+					break;
+				case MotionEvent.ACTION_UP:
+					if ((startY - currentY) > 2*ViewConfiguration.getTouchSlop()) {
+						collapseWindow();
+					}
+					break;
+				default:
+					break;
+
+			}
+			return false;
+		}
+
+
+    }
+
+    boolean mIsCollapse = false;
+
+    class CollapseExpandRunnable implements Runnable {
+
+    	boolean expand = false;
+
+    	public CollapseExpandRunnable(boolean expand) {
+    		this.expand = expand;
+    	}
+
+    	float index = 0.f;
+
+    	@Override
+		public void run() {
+    		long currentTime = SystemClock.currentThreadTimeMillis();
+    		index += 0.1;
+
+    		float deltaTime = /*(float)(currentTime - mStartTime) / (float)sDuration*/ index;
+    		deltaTime = deltaTime > 1.0f ? 1.0f : deltaTime;
+
+
+    		boolean willEndAnimation = (deltaTime >= 1.0f);
+
+
+
+    		int deltaDistence = (int)(mInterpolator.getInterpolation(deltaTime) * mAnimationLength);
+    		if (expand) {
+    			mWinParams.y = mStartY + deltaDistence;
+    		} else {
+    			mWinParams.y = mStartY - deltaDistence;
+    		}
+    		SLog.d(TAG,"mWinParams.y = "+mWinParams.y + "deltaDistence = "+deltaDistence);
+
+    		if (!mAddedWindow) {
+    			willEndAnimation = true;
+    		} else {
+    			wm.updateViewLayout(mContentView, mWinParams);
+    		}
+
+			if (willEndAnimation) {
+				endAnimation();
+			} else {
+				mHandler.postDelayed(clRunnalbe,5);  //5ms移动一次
+			}
+
+		}
+
+	}
+
+    private boolean mExpandAnimationRunning = false;
+    private boolean mCollapseAnimationRunning = false;
+    private long mStartTime;
+    static long sDuration = 5000; //动画持续5s
+	private int mAnimationLength;
+	private int mStartY;
+	private static int sAutoCollapseInteval = 3000; //自动回收时间间隔，即展开3s后自动收起
+	private Runnable clRunnalbe = null;
+	private Runnable cllDelayRunnable = null;
+
+    private class CollapseDelayRunnable implements Runnable {
+
+		@Override
+		public void run() {
+			// TODO Auto-generated method stub
+			collapseWindow();
+		}
+
+    }
+
+    private void autoCollapseWindow(int time) { //自动回收
+//		mHandler.removeCallbacks(cllDelayRunnable);
+//		mHandler.removeCallbacks(clRunnalbe);
+    	cancelAutoAnimation();
+		cllDelayRunnable = new CollapseDelayRunnable();
+		mHandler.postDelayed(cllDelayRunnable,time);
+    }
+
+    private void cancelAutoAnimation() {
+		mHandler.removeCallbacks(cllDelayRunnable);
+		if (!isAnimation()) {
+			mHandler.removeCallbacks(clRunnalbe);
+		}
+    }
+
+	private void endAnimation() {
+		if (mExpandAnimationRunning) {
+			autoCollapseWindow(3000);
+		} else {
+			removeWindow();
+		}
+
+		if (mExpandAnimationRunning) {
+			mWinParams.flags &=  ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+			wm.updateViewLayout(mContentView, mWinParams);
+		}
+		mExpandAnimationRunning = false;
+		mCollapseAnimationRunning = false;
+
+	}
+
+    private void setAnimationParam(boolean expand) {
+		mStartTime = SystemClock.currentThreadTimeMillis();
+
+		if (expand) {
+			mExpandAnimationRunning = true;
+		} else {
+			mCollapseAnimationRunning = true;
+		}
+		mAnimationLength = mWinParams.height;
+		mStartY = mWinParams.y;
+		//mWinParams.flags |= (WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS );
+		mWinParams.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+		wm.updateViewLayout(mContentView, mWinParams);
+		//mStartY = - mWinParams.height;
+    }
+
+    private boolean isAnimation() {
+    	return (mExpandAnimationRunning || mCollapseAnimationRunning);
+    }
+
+    private void expandWindow() {
+		if (!isAnimation()) {
+			mHandler.removeCallbacks(cllDelayRunnable);
+			mHandler.removeCallbacks(clRunnalbe);
+			clRunnalbe = new CollapseExpandRunnable(true);
+			setAnimationParam(true);
+			mHandler.post(clRunnalbe);
+
+		}
+    }
+
+
+
+    private void collapseWindow() {
+
+		if (!isAnimation()) {
+			mHandler.removeCallbacks(cllDelayRunnable);
+			mHandler.removeCallbacks(clRunnalbe);
+			clRunnalbe = new CollapseExpandRunnable(false);
+			setAnimationParam(false);
+			mHandler.post(clRunnalbe);
+		}
+
+    }
+
+
+
+    public void removeWindow() {
+    	if (mAddedWindow) {
+    		wm.removeView(mContentView);
+    		mAddedWindow = false;
+    	}
+    }
+
+    private Drawable getDrawable(String fileName,Context context) {
+
+    	context = context.getApplicationContext();
+        AssetManager assetManager = context.getAssets();
+
+        Drawable drawable = null;
+        try {
+            InputStream inputStream = assetManager.open(fileName);
+            if (inputStream == null) {
+            	return null;
+            }
+            if (fileName.endsWith(".9.png")) {
+                Bitmap bitmap = null;
+                try {
+                    bitmap = BitmapFactory.decodeStream(inputStream);
+                } catch (OutOfMemoryError e) {
+                    e.printStackTrace();
+					bitmap = null;
+                }
+                if (bitmap != null) {
+	                byte[] chunk = bitmap.getNinePatchChunk();
+	                boolean result = NinePatch.isNinePatchChunk(chunk);
+	                NinePatchDrawable patchy = new NinePatchDrawable(bitmap, chunk, new Rect(), null);
+	                drawable = patchy;
+                } else {
+                	return null;
+                }
+            } else {
+            	drawable = Drawable.createFromStream(inputStream, fileName);
+            	inputStream.close();
+
+            }
+
+        } catch (IOException e) {
+
+        	e.printStackTrace();
+        }
+        return drawable;
+    }
+
+
+
+    private static class TaskInfo {
+        private static final String TASK_ID_KEY = "task_id";
+        private static final String TASK_DESC_KEY = "task_desc";
+        private static final String STEP_INFO_KEY = "step_info";
+
+    	String taskId;
+    	String taskDesc;
+    	StepInfo[] stepInfoArray;
+
+    	public boolean isValidTask () {
+    		if(!TextUtils.isEmpty(taskId) /*&& !TextUtils.isEmpty(taskDesc)*/ && stepInfoArray != null && stepInfoArray.length > 0) {
+    			return true;
+    		} else {
+    			return false;
+    		}
+    	}
+
+
+    	static TaskInfo manualGenerateTaskInfo () {
+    		TaskInfo taskInfo = new TaskInfo();
+    		taskInfo.taskId = "1111133333";
+    		taskInfo.taskDesc = "xxxxx";
+    		taskInfo.stepInfoArray = new StepInfo[2];
+			StepInfo info = new StepInfo(0,"一走了之你好","4金劵",0,2);
+			taskInfo.stepInfoArray[0] = info;
+			info = new StepInfo(0,"电脑推送QQ泡泡毛你好","500金劵",0,1);
+			taskInfo.stepInfoArray[1] = info;
+
+			return taskInfo;
+    	}
+
+    	static TaskInfo generateFromJSONObject(JSONObject json) throws JSONException {
+    		if (json == null) {
+    			//add for test
+    			//return manualGenerateTaskInfo();
+    			return null;
+    		}
+
+//    		if (true) {
+//    			return manualGenerateTaskInfo();
+//    		}
+
+    		TaskInfo taskInfo = new TaskInfo();
+    		json = json.getJSONObject("task_info");
+    		taskInfo.taskId = json.getString(TASK_ID_KEY);
+    		taskInfo.taskDesc = json.getString(TASK_DESC_KEY);
+    		JSONArray jsonArray = json.getJSONArray(STEP_INFO_KEY);
+    		int length = jsonArray.length();
+
+    		if (length > 0) {
+    			taskInfo.stepInfoArray = new StepInfo[length];
+    		}
+
+    		for (int i = 0; i < length; i++) {
+    			JSONObject item = jsonArray.getJSONObject(i);
+    			int stepNumber = item.getInt("step_no");
+    			int stepStatus = item.getInt("status");
+    			String stepDesc = null;
+    			String stepGift = null;
+
+				stepDesc = item.getString("step_desc");
+
+				stepGift = item.getString("step_gift");
+
+
+
+    			long endTime = item.getLong("end_time");
+
+    			StepInfo info = new StepInfo(stepNumber,stepDesc,stepGift,endTime,stepStatus);
+    			taskInfo.stepInfoArray[i] = info;
+    		}
+    		return taskInfo;
+
+    	}
+
+    }
+
+    private static class StepInfo {
+    	int stepNumber;
+    	String stepDesc;
+    	String stepGift;
+    	long endTime;
+    	//新增 9/11
+    	int status;  // 1:未完成 ， 2：未领取金券
+
+    	public StepInfo(int stepNumber,String stepDesc,String stepGift, long endTime, int stepStatus) {
+    		this.stepNumber = stepNumber;
+    		this.stepDesc = stepDesc;
+    		this.stepGift = stepGift;
+    		this.endTime = endTime;
+    		this.status = stepStatus;
+    	}
+
+    }
+
+
+	 private class TaskRequestListener extends BaseRequestListener {
+
+		@Override
+		public void onComplete(JSONObject response) {
+
+			try {
+				mTaskInfo = TaskInfo.generateFromJSONObject(response);
+			} catch (JSONException e) {
+				//mListener.onError(new UiError(100,"error ","获取任务失败"));
+				e.printStackTrace();
+			}
+
+
+			if (mTaskInfo != null && mTaskInfo.isValidTask()) {
+				showWindow();
+				moveToState(2,TaskState.NORAML);
+				JSONObject rep = new JSONObject();
+				try {
+					rep.put("result", "获取成功");
+				} catch (JSONException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				mListener.onComplete(rep);
+			} else {
+				handleException(null);
+			}
+		}
+
+		@Override
+        protected void handleException(Exception e) {
+
+			if (e != null) {
+				e.printStackTrace();
+			}
+
+			if (e == null) {
+				JSONObject rep = new JSONObject();
+				try {
+					rep.put("result", "暂无任务");
+				} catch (JSONException ex) {
+					// TODO Auto-generated catch block
+					ex.printStackTrace();
+				}
+				mListener.onComplete(rep);
+			} else {
+				mListener.onError(new UiError(100,"error ","获取任务失败"));
+			}
+			mHandler.post(new Runnable() {
+
+				@Override
+				public void run() {
+					// TODO Auto-generated method stub
+					//Toast.makeText(mContext, "获取任务信息失败", Toast.LENGTH_SHORT).show();
+					moveToState(2,TaskState.INIT);
+				}
+
+			});
+
+		}
+
+
+	}
+
+	 private abstract class BaseRequestListener implements IRequestListener {
+		 protected abstract void handleException(Exception e);
+
+		 @Override
+			public void onIOException(IOException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onMalformedURLException(MalformedURLException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onJSONException(JSONException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onConnectTimeoutException(ConnectTimeoutException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onSocketTimeoutException(SocketTimeoutException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onNetworkUnavailableException(NetworkUnavailableException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onHttpStatusException(HttpStatusException e) {
+				handleException(e);
+			}
+
+			@Override
+			public void onUnknowException(Exception e) {
+				handleException(e);
+			}
+
+	 }
+
+	 private void showToast(final String message) {
+		 mHandler.post(new Runnable() {
+
+			@Override
+			public void run() {
+				// TODO Auto-generated method stub
+				Toast.makeText(mContext, "失败："+message, Toast.LENGTH_LONG).show();
+			}
+
+		 });
+	 }
+
+	 private class GiftResultListener extends BaseRequestListener {
+
+		int index = -1;
+		public GiftResultListener(int step_no) {
+			this.index = step_no;
+		}
+		@Override
+		public void onComplete(JSONObject response) {
+
+			String message = null;
+			try {
+				int ret = response.getInt("code");
+				message = response.getString("message");
+				if (ret == 0) {
+					moveToState(index,TaskState.REWARD_SUCCESS);
+
+					JSONObject rep = new JSONObject();
+					try {
+						rep.put("result", "金券领取成功");
+					} catch (JSONException ex) {
+						// TODO Auto-generated catch block
+						ex.printStackTrace();
+					}
+					mListener.onComplete(rep);
+
+
+				} else {
+					moveToState(index,TaskState.NORAML);
+					showToast(message);
+
+					JSONObject rep = new JSONObject();
+					try {
+						rep.put("result", "金券领取失败");
+					} catch (JSONException ex) {
+						// TODO Auto-generated catch block
+						ex.printStackTrace();
+					}
+					mListener.onComplete(rep);
+				}
+
+			} catch (JSONException e) {
+				moveToState(index,TaskState.NORAML);
+				showToast(message);
+				e.printStackTrace();
+			}
+			updateContentView(index);
+
+			autoCollapseWindow(2000);
+		}
+
+	    @Override
+        protected void handleException(final Exception e) {
+			if (e != null) {
+				e.printStackTrace();
+			}
+
+			mListener.onError(new UiError(101,"error ","金券领取时出现异常"));
+
+	    	if (mHandler != null) {
+	    		mHandler.post(new Runnable() {
+
+					@Override
+					public void run() {
+						TaskState state = TaskState.INIT;
+						if (index == 0) {
+							state = mState1;
+						} else {
+							state = mState2;
+						}
+						if(state == TaskState.WAITTING_BACK_REWARD){
+							moveToState(index,TaskState.NORAML);
+							showToast("领取失败 :"+  e.getClass().getName());
+						}
+						updateContentView(index);
+						autoCollapseWindow(2000);
+					}
+
+	    		});
+
+	    	}
+	    }
+
+
+
+	}
+
+
+
+	 IUiListener mListener;
+
+    public void showTaskGuideWindow(Activity activity, Bundle bun, IUiListener listener) {
+    	mContext = activity;
+    	mListener = listener;
+
+    	if((mState1 == TaskState.WAITTING_BACK_TASKINFO || mState2 == TaskState.WAITTING_BACK_TASKINFO) || mAddedWindow) {  //避免连续请求
+    		SLog.i(TAG, "showTaskGuideWindow, mState1 ==" + mState1 + ", mState2" + mState2);
+    		return;
+    	}
+
+    	mTaskInfo = null;
+
+    	Bundle params;
+
+    	if (bun != null) {
+    		params = new Bundle(bun);
+    		params.putAll(composeCGIParams());
+
+    	} else {
+    		params = composeCGIParams();
+    	}
+
+    	TaskRequestListener requestListener = new TaskRequestListener();
+    	params.putString("action", "task_list");
+    	params.putString("auth", "mobile");
+
+    	params.putString("appid", mToken.getAppId());
+
+		HttpUtils.requestAsync(mToken, mContext, CGI_APP_GRADE_URI,
+				params, Constants.HTTP_GET, requestListener);
+
+		moveToState(2,TaskState.WAITTING_BACK_TASKINFO);
+    }
+
+    private void getGift(int index) {
+
+    	Bundle params = composeCGIParams();
+    	params.putString("action", "get_gift");
+    	params.putString("task_id", mTaskInfo.taskId/*"1_1378208276"*/);
+    	params.putString("step_no" ,new Integer(index).toString());
+    	params.putString("appid", mToken.getAppId());
+
+    	GiftResultListener resultListener = new GiftResultListener(index);
+		HttpUtils.requestAsync(mToken, mContext, CGI_APP_GRADE_URI,
+				params, Constants.HTTP_GET, resultListener);
+
+		moveToState(index,TaskState.WAITTING_BACK_REWARD);
+		TencentStat.trackCustomEvent(mContext, mToken, "TaskApi", "getGift");
+    }
+
+}

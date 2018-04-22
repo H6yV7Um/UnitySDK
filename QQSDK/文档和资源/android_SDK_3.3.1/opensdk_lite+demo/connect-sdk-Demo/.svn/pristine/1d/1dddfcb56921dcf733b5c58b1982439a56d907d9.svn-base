@@ -1,0 +1,660 @@
+package com.tencent.connect.auth;
+
+import android.annotation.SuppressLint;
+import android.annotation.TargetApi;
+import android.app.Dialog;
+import android.content.Context;
+import android.content.DialogInterface;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.Color;
+import android.net.Uri;
+import android.net.http.SslError;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
+import android.os.SystemClock;
+import android.text.TextUtils;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.View;
+import android.view.View.OnLongClickListener;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.view.WindowManager;
+import android.webkit.SslErrorHandler;
+import android.webkit.WebChromeClient;
+import android.webkit.WebSettings;
+import android.webkit.WebSettings.RenderPriority;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.FrameLayout.LayoutParams;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.tencent.connect.auth.AuthMap.Auth;
+import com.tencent.connect.common.Constants;
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.ReportManager;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.Util;
+import com.tencent.open.web.security.JniInterface;
+import com.tencent.open.web.security.SecureJsBridge;
+import com.tencent.open.web.security.SecureJsInterface;
+import com.tencent.open.widget.SecureWebView;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+
+public class AuthDialog extends Dialog {
+	private final static String TAG = SLog.TAG + ".AuthDialog";
+	private static final String ACTION_LOGIN = "action_login";
+	private static final int MAX_RETRY_COUNT = 1;
+	
+	//两分钟webview超时
+	private static final int WEBVIEW_TIMEOUT = 60000 * 2;
+	
+	//当前无可用网络
+	private static final int ERROR_NO_NETWORK = 9001;
+	//webview加载url的超时
+	private static final int ERROR_WEBVIEW_TIMEOUT = 9002;
+
+    private String mUrl;
+    private OnTimeListener mListener;
+    private IUiListener listener;
+    private Handler mHandler;
+    private FrameLayout mFlMain;
+    private LinearLayout mFlProcess;
+    private FrameLayout mProcessContainer;
+    private ProgressBar mPbProcess;
+    
+    private String mAction;
+    
+    private static final int MSG_COMPLETE = 1;
+    private static final int MSG_CANCEL = 2;
+    private static final int MSG_SHOW_TIPS = 3;
+    private static final int MSG_ON_LOAD = 4;
+    //超时机制的msg token
+    private static final int MSG_TIMEOUT = 5;
+
+    private SecureWebView mWebView;
+    private Context mContext;
+    private SecureJsBridge mJsBridge;
+
+    private boolean isBrowserStarted = false;
+    private int mRetryCount;
+    private String mRetryUrl;
+    //private boolean mRetryFlag;
+    private String mUin;
+    
+    //记录页面加载时间, 用于判断重试逻辑
+    private long mPageStartTime = 0;
+    //页面加载时间间隔值
+    private long MAX_RETRY_TIME = 1000 * 30;
+    private HashMap<String, Runnable> mTimeoutMap;
+    
+	public AuthDialog(Context context, String action, String url, final IUiListener listener, QQToken token) {
+        super(context, android.R.style.Theme_Translucent_NoTitleBar);
+        mContext = context/*.getApplicationContext()*/;
+        mUrl = url;
+        mListener = new OnTimeListener(action, url, token.getAppId(), listener);
+        mHandler = new THandler(mListener, context.getMainLooper());
+        this.listener = listener;
+        mAction = action;
+        mJsBridge = new SecureJsBridge();
+        
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+    }
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		requestWindowFeature(Window.FEATURE_NO_TITLE);
+		super.onCreate(savedInstanceState);		
+		createViews();
+        initViews();
+        
+        mTimeoutMap = new HashMap<String, Runnable>();
+	}
+
+	@Override
+	public void onBackPressed() {
+		if (!isBrowserStarted) {
+	        mListener.onCancel();
+	    }
+		super.onBackPressed();
+	}
+	
+	@Override
+    protected void onStop() {
+        super.onStop();
+        
+    }
+
+    private class THandler extends Handler {
+
+        private OnTimeListener mL;
+
+        public THandler(OnTimeListener l, Looper mainLooper) {
+            super(mainLooper);
+            mL = l;
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MSG_COMPLETE:
+                    mL.onComplete((String) msg.obj);
+                    break;
+
+                case MSG_CANCEL:
+                    mL.onCancel();
+                    break;
+
+                case MSG_SHOW_TIPS:
+                    // add by milesxia 2012-11-09
+                    // js网页调用此函数在终端上弹出tips
+                    showTips(mContext, (String) msg.obj);
+                    break;
+                default:
+                    break;
+            }
+        }
+    }
+	
+	private class OnTimeListener implements IUiListener {
+
+        private String mAction;
+        String mUrl;
+        String mAppid;
+        private IUiListener mWeakL;
+
+        public OnTimeListener(String action, String url, String appid, IUiListener l) {
+            mAction = action;
+            mUrl = url;
+            mAppid = appid;
+            mWeakL = l;
+        }
+
+        private void onComplete(String result) {
+            try {
+                JSONObject obj = Util.parseJson(result);
+                onComplete(obj);
+            } catch (JSONException e) {
+                e.printStackTrace();
+                onError(new UiError(Constants.ERROR_JSON,
+                        Constants.MSG_JSON_ERROR, result));
+            }
+        }
+
+        @Override
+        public void onComplete(Object obj) {
+        	JSONObject response = (JSONObject)obj;
+        	ReportManager.getInstance().reportCgi(mAction + "_H5", SystemClock.elapsedRealtime(), 0, 0,
+                    response.optInt("ret", -6), mUrl, false);
+            if (mWeakL != null) {
+                mWeakL.onComplete(response);
+                mWeakL = null;
+            }
+        }
+
+        @Override
+        public void onError(UiError e) {
+            String detail = e.errorMessage != null ? e.errorMessage + mUrl : mUrl;
+            ReportManager.getInstance().reportCgi(mAction + "_H5", SystemClock.elapsedRealtime(), 0, 0, e.errorCode,
+                    detail, false);
+            detail = getDetailWithEncryptUin(detail);
+            if (mWeakL != null) {
+                mWeakL.onError(e);
+                mWeakL = null;
+            }
+        }
+
+        @Override
+        public void onCancel() {
+            if (mWeakL != null) {
+                mWeakL.onCancel();
+                mWeakL = null;
+            }
+        }
+
+    }
+	
+	private String getDetailWithEncryptUin(String detail) {
+        StringBuilder errDetail = new StringBuilder(detail);
+        if (!TextUtils.isEmpty(mUin) && mUin.length() >= 4) {
+            String encryptUin = mUin.substring(mUin.length() - 4);
+            /*try {
+                encryptUin = StringCrypto.encrypt("com.open", mUin);
+            } catch (Exception e) {
+            }*/
+            errDetail.append("_u_").append(encryptUin);
+        }
+        
+        return errDetail.toString();
+    }
+    
+	private class LoginWebViewClient extends WebViewClient {
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        	SLog.v(TAG, "-->Redirect URL: " + url);
+            if (url.startsWith(AuthConstants.REDIRECT_BROWSER_URI)) {
+                JSONObject data = Util.parseUrlToJson(url);
+                // 1. 保存listener
+                // 2. 跳系统浏览器
+                isBrowserStarted = authWithBrowser();
+                // Log.d(TAG,""+isBrowserStarted);
+                if (isBrowserStarted) {// 跳浏览器成功
+                    // dismiss();
+                } else if (null != data.optString("fail_cb", null)) {
+                    // 如果提供了打开浏览器失败的js回调, 就只执行该回调
+                    callJs(data.optString("fail_cb"), "");
+                } else if (data.optInt("fall_to_wv") == 1) {
+                    // 允许用webview进行登录
+                    mUrl += mUrl.indexOf("?") > -1 ? "&" : "?";
+                    mUrl += "browser_error=1";
+                    mWebView.loadUrl(mUrl);
+                } else {
+                    // 不允许用webview登录
+                    // 重定向到提示页
+                    String redirUrl = data.optString("redir", null);
+                    if (null != redirUrl) {
+                        mWebView.loadUrl(redirUrl);
+                    }
+                }
+                return true;
+                // modify by milesxia 2013-01-21
+            } else if (url.startsWith(ServerSetting.DEFAULT_REDIRECT_URI)) {
+                mListener.onComplete(Util.parseUrlToJson(url));
+                dismiss();
+                return true;
+            } else if (url.startsWith(AuthConstants.CANCEL_URI)) {
+                mListener.onCancel();
+                dismiss();
+                return true;
+            } else if (url.startsWith(AuthConstants.CLOSE_URI)) {
+                // 关闭webview
+                dismiss();
+                return true;
+            } else if (url.startsWith(AuthConstants.DOWNLOAD_URI) || url.endsWith(".apk")) {//支持.apk结尾的连接下载
+                // 在浏览器中打开需要下载的url
+                try {
+                    Uri uri;
+                    if(url.startsWith(Constants.DOWNLOAD_URI)){
+                        uri = Uri.parse(Uri.decode(url.substring(Constants.DOWNLOAD_URI.length())));
+                    }else {
+                        uri = Uri.parse(Uri.decode(url));
+                    }
+                    Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    mContext.startActivity(intent);
+                } catch (Exception e) {
+                    SLog.e(TAG, "-->start download activity exception, e: ",e);
+                }
+                return true;
+            } else if (url.startsWith(AuthConstants.PROGRESS_URI)) {
+                //此逻辑给前端调用，优化页面加载出来了菊花不消失的问题
+                try {
+                    Uri uri = Uri.parse(url);
+                    List<String> paths = uri.getPathSegments();
+                    if (paths.isEmpty())
+                        return true;
+                    int value = Integer.valueOf(paths.get(0));
+                    if (value == 0) {
+                        // 表示隐藏菊花
+                        mProcessContainer.setVisibility(View.GONE);
+                        mWebView.setVisibility(View.VISIBLE);
+                    } else if (value == 1) {
+                        // 表示显示菊花
+                        mProcessContainer.setVisibility(View.VISIBLE);
+                    }
+                    return true;
+                } catch(Exception e) {
+                    return true;
+                }
+            } else if (url.startsWith(AuthConstants.ON_LOGIN_URI)) {
+                try {
+                    Uri uri = Uri.parse(url);
+                    List<String> paths = uri.getPathSegments();
+                    if (!paths.isEmpty())
+                        mUin = paths.get(0);
+                } catch(Exception e) {
+                }
+                return true;
+            } else if (mJsBridge.canHandleUrl(mWebView, url)) {
+            	return true;
+            }
+            
+            SLog.i(TAG, "-->Redirect URL: return false");
+            return false;
+        }
+
+        @Override
+        public void onReceivedError(WebView view, int errorCode,
+                String description, String failingUrl) {
+            super.onReceivedError(view, errorCode, description, failingUrl);
+            SLog.i(TAG, "-->onReceivedError, errorCode: " + errorCode + " | description: " + description);
+            
+            if (!Util.checkNetWork(mContext)) {
+                mListener.onError(new UiError(ERROR_NO_NETWORK, "当前网络不可用，请稍后重试！", failingUrl));
+                dismiss();
+                return;
+            }
+            boolean downloadQQ = mRetryUrl.startsWith(ServerSetting.DOWNLOAD_QQ_URL);
+            //如果不是下载手Q的链接，并且小于重试次数，则尝试重试。
+            if (!downloadQQ) {
+                //mRetryFlag = true;
+                long time = SystemClock.elapsedRealtime() - mPageStartTime;
+                if (mRetryCount < MAX_RETRY_COUNT && time < MAX_RETRY_TIME) {
+                    mRetryCount++;
+                    //mWebView.loadUrl(mRetryUrl);
+                    //避免出现网络刚连上但是网络不通的情况，加延时重试
+                    mHandler.postDelayed(new Runnable() {
+                        
+                        @Override
+                        public void run() {
+                            mWebView.loadUrl(mRetryUrl);
+                        }
+                    }, 500);
+                } else {
+                    mWebView.loadUrl(generateDownloadUrl());
+                }
+                return;
+            }
+            
+            mListener.onError(new UiError(errorCode, description, failingUrl));
+            dismiss();
+        }
+
+        @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+            SLog.v(TAG, "-->onPageStarted, url: " + url);
+            //mRetryFlag = false;
+            super.onPageStarted(view, url, favicon);
+            mProcessContainer.setVisibility(View.VISIBLE);
+            
+            mPageStartTime = SystemClock.elapsedRealtime();
+            
+            //针对打开下载页面失败的情况，增加30s的超时机制. 先移除上一次的r,然后再添加本次的r.
+            if(!TextUtils.isEmpty(mRetryUrl)) {
+                mHandler.removeCallbacks(mTimeoutMap.remove(mRetryUrl));
+            }
+            mRetryUrl = url;
+            
+            Runnable r = new TimeOutRunable(mRetryUrl);
+            mTimeoutMap.put(url, r);
+            mHandler.postDelayed(r, WEBVIEW_TIMEOUT);
+            //mHandler.postAtTime(r, url, SystemClock.uptimeMillis() + WEBVIEW_TIMEOUT);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            super.onPageFinished(view, url);
+            SLog.v(TAG, "-->onPageFinished, url: " + url);
+
+            mProcessContainer.setVisibility(View.GONE);
+            if (null != mWebView) {
+                mWebView.setVisibility(View.VISIBLE);
+            }
+
+            //移除对应的超时机制
+            if(!TextUtils.isEmpty(url)) {
+                mHandler.removeCallbacks(mTimeoutMap.remove(url));
+            }
+        }
+
+        @TargetApi(8)
+        @Override
+        public void onReceivedSslError(WebView view, SslErrorHandler handler,
+                SslError error) {
+            //super.onReceivedSslError(view, handler, error);
+            SLog.e(TAG, "-->onReceivedSslError " + error.getPrimaryError() + "请求不合法，请检查手机安全设置，如系统时间、代理等");
+        	handler.cancel();
+            mListener.onError(new UiError(error.getPrimaryError(),
+                    "请求不合法，请检查手机安全设置，如系统时间、代理等。", "ssl error"));
+            dismiss();
+        }
+
+    }
+	
+	/**
+	 * 用于webview超时机制
+	 * @author dapingyu
+	 *
+	 */
+	class TimeOutRunable implements Runnable {
+	    String timeoutUrl = "";
+	    
+	    public TimeOutRunable(String loadUrl) {
+	        timeoutUrl = loadUrl;
+        }
+	    
+        @Override
+        public void run() {
+            SLog.v(TAG, "-->timeoutUrl: " + timeoutUrl + " | mRetryUrl: " + mRetryUrl);
+            if(timeoutUrl.equals(mRetryUrl)) {
+                mListener.onError(new UiError(ERROR_WEBVIEW_TIMEOUT, "请求页面超时，请稍后重试！", mRetryUrl));
+                dismiss();
+            }
+        }
+    };
+	
+	private String generateDownloadUrl() {
+	    String params = mUrl.substring(mUrl.indexOf("?") + 1);
+	    String url = ServerSetting.DOWNLOAD_QQ_URL + params;
+	    SLog.i(TAG, "-->generateDownloadUrl, url: " + ServerSetting.DOWNLOAD_QQ_URL);
+	    return url;
+	}
+	
+	private void createViews() {
+	    createProgress();
+	    LayoutParams flMainParams = new LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        mWebView = new SecureWebView(mContext);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.HONEYCOMB) {
+			//if (mWebView.isHardwareAccelerated()) {
+				mWebView.setLayerType(View.LAYER_TYPE_SOFTWARE, null);
+			//}
+		}
+        mWebView.setLayoutParams(flMainParams);
+
+        mFlMain = new FrameLayout(mContext);
+        flMainParams.gravity = Gravity.CENTER;
+        mFlMain.setLayoutParams(flMainParams);
+
+        mFlMain.addView(mWebView);
+        mFlMain.addView(mProcessContainer);
+
+        setContentView(mFlMain);
+	}
+	
+	private void createProgress() {
+        mPbProcess = new ProgressBar(mContext);
+        LinearLayout.LayoutParams pbProcessParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        mPbProcess.setLayoutParams(pbProcessParams);
+        mFlProcess = new LinearLayout(mContext);
+        TextView text = null;
+        if (mAction.equals(ACTION_LOGIN)) {
+            LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT);
+            textParams.gravity = Gravity.CENTER_VERTICAL;
+            textParams.leftMargin = 5;
+            text = new TextView(mContext);
+            String language = Locale.getDefault().getLanguage();
+            if (language.equals("zh")) {
+                text.setText("登录中...");
+            } else {
+                text.setText("Logging in...");
+            }
+            text.setTextColor(Color.rgb(255, 255, 255));
+            text.setTextSize(18);
+            text.setLayoutParams(textParams);
+        }
+        
+        LayoutParams flProcessParams = new LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        flProcessParams.gravity = Gravity.CENTER;
+        mFlProcess.setLayoutParams(flProcessParams);
+        mFlProcess.addView(mPbProcess);
+        if(text != null) {
+            mFlProcess.addView(text);
+        }
+        mProcessContainer = new FrameLayout(mContext);
+        LayoutParams mPCLayoutParams = new LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        mPCLayoutParams.leftMargin = 80;
+        mPCLayoutParams.rightMargin = 80;
+        mPCLayoutParams.topMargin = 40;
+        mPCLayoutParams.bottomMargin = 40;
+        mPCLayoutParams.gravity = Gravity.CENTER;
+        mProcessContainer.setLayoutParams(mPCLayoutParams);
+        mProcessContainer.setBackgroundResource(android.R.drawable.alert_dark_frame);
+        mProcessContainer.addView(mFlProcess);
+    }
+	
+    @SuppressLint("SetJavaScriptEnabled")
+    private void initViews() {
+        // View v = findViewById(R.id.com_tencent_open_progress_fl);
+        // sWeakProcessBar = new WeakReference<View>(v);
+        // mWebView = (WebView) findViewById(R.id.com_tencent_open_dialog_wv);
+        mWebView.setVerticalScrollBarEnabled(false);
+        mWebView.setHorizontalScrollBarEnabled(false);
+        mWebView.setWebViewClient(new LoginWebViewClient());
+        mWebView.setWebChromeClient(new WebChromeClient());
+        mWebView.clearFormData();
+        // 修复低端机偶现拉取js太慢，菊花一直不消失的问题
+        // mWebView.clearCache(true);
+        mWebView.clearSslPreferences();
+        mWebView.setOnLongClickListener(new OnLongClickListener() {
+            
+            @Override
+            public boolean onLongClick(View v) {
+                //返回true，禁用webview的长按事件
+                return true;
+            }
+        });
+        mWebView.setOnTouchListener(new View.OnTouchListener() {
+
+			@Override
+			public boolean onTouch(View v, MotionEvent event) {
+				switch (event.getAction()) {
+				case MotionEvent.ACTION_DOWN:
+				case MotionEvent.ACTION_UP:
+					if (!v.hasFocus()) {
+						v.requestFocus();
+					}
+					break;
+				}
+				return false;
+			}
+
+		});
+
+        WebSettings setting = mWebView.getSettings();
+        setting.setSavePassword(false);
+        setting.setSaveFormData(false);
+        // setting.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+        setting.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        // add by milesxia 2012-11-16
+        setting.setNeedInitialFocus(false);
+        setting.setBuiltInZoomControls(true);
+        setting.setSupportZoom(true);
+        
+        setting.setRenderPriority(RenderPriority.HIGH);
+        setting.setJavaScriptEnabled(true);
+
+        setting.setDatabaseEnabled(true);
+        setting.setDatabasePath(mContext
+                    .getDir("databases", Context.MODE_PRIVATE).getPath());
+        setting.setDomStorageEnabled(true);
+
+        SLog.v(TAG, "-->mUrl : " + mUrl);
+        mRetryUrl = mUrl;
+        mWebView.loadUrl(mUrl);
+        mWebView.setVisibility(View.INVISIBLE);
+        mWebView.getSettings().setSavePassword(false);
+        
+        mJsBridge.registerHandler(new SecureJsInterface(), "SecureJsInterface");
+        //避免重新打开web页时出现账号框为*的问题
+        SecureJsInterface.isPWDEdit = false;
+        
+        super.setOnDismissListener(new OnDismissListener() {
+			
+			@Override
+			public void onDismiss(DialogInterface dialog) {
+				try {
+					JniInterface.clearAllPWD();
+				} catch (Exception e) {
+				}
+			}
+		});
+    }
+    
+    private boolean authWithBrowser(){
+		AuthMap authMap=AuthMap.getInstance();
+		String key=authMap.makeKey();
+		Auth auth=new Auth();
+		auth.listener=listener;
+		auth.dialog=AuthDialog.this;
+		auth.key=key;
+		String serial=authMap.set(auth);
+		String rootUrl = mUrl.substring(0, mUrl.indexOf("?"));
+		Bundle params = Util.parseUrl(mUrl);
+		params.putString("token_key", key);
+		params.putString("serial", serial);
+		params.putString("browser", "1");
+		mUrl = rootUrl + "?" + HttpUtils.encodeUrl(params);
+		return Util.openBrowser(mContext, mUrl);
+	}
+
+	private static void showTips(Context context, String response) {
+	    try {
+	        // tips时间控制，0短1长
+	        JSONObject tips = Util.parseJson(response);
+	        int type = tips.getInt("type");
+	        // 弹出的tips内容
+	        String tipsMsg = tips.getString("msg");
+	        Toast toast = Toast.makeText(context.getApplicationContext(), tipsMsg, type);
+	        toast.show();
+	    } catch (JSONException e) {
+	        e.printStackTrace();
+	    }
+	}
+	
+	public void callJs(String method, String data) {
+        String script = "javascript:" + method + "(" + data + ");void("+ System.currentTimeMillis() + ");";
+        mWebView.loadUrl(script);
+    }
+	
+	// 退出时remove handler并检查是否已经调用过dismiss.
+	@Override
+	public void dismiss() {
+	    mTimeoutMap.clear();
+	    mHandler.removeCallbacksAndMessages(null);
+	    if(this.isShowing()) {
+	        super.dismiss();
+	    }
+	    if (mWebView != null) {
+	    	mWebView.destroy();
+	    	mWebView = null;
+	    }
+	}
+}

@@ -1,0 +1,136 @@
+package com.tencent.open.yyb;
+
+import java.util.HashMap;
+import com.tencent.open.log.SLog;
+
+import android.app.Dialog;
+import android.content.Context;
+import android.graphics.Color;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.util.DisplayMetrics;
+import android.view.Gravity;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.LinearLayout.LayoutParams;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+
+public class MoreFloatingDialog extends Dialog {
+
+    private static final String TAG = SLog.TAG + ".MoreFloatingDialog";
+	private static final String SOURCE_FLOATING_BG = "yyb_appdetail_bg_floatingwindow.9.png";
+	private static final String SOURCE_QQ_BG = "yyb_qq.png";
+	private static final String SOURCE_QZONE_BG = "yyb_qzone.png";
+	private static final String SOURCE_WEIXIN_BG = "yyb_weixin.png";
+	private static final String SOURCE_FRIENDS_BG = "yyb_friends.png";
+	
+	private static final float SHARE_ICON_SIZE = 28f;
+	private static final float NINE_PATCH_TOP = 9f;
+	
+	private LinearLayout mRootView;
+	private RelativeLayout mContentView;
+	
+	private HashMap<String, TextView> mShareItems;
+	
+	private float density;
+	
+	private Rect ninePatchRect;
+
+	public MoreFloatingDialog(Context context) {
+		super(context, android.R.style.Theme_Translucent_NoTitleBar);
+		
+		mShareItems = new HashMap<String, TextView>(4);
+		ninePatchRect = new Rect(0, dip2px(NINE_PATCH_TOP), 0, 0);
+		
+		WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+		DisplayMetrics metrics = new DisplayMetrics();
+		wm.getDefaultDisplay().getMetrics(metrics);
+		density = metrics.density;
+		
+		SLog.d(TAG, "-->(MoreFloatingDialog) : density = " + density);
+		
+		LayoutParams params = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+		mContentView = new RelativeLayout(context);
+		mContentView.setLayoutParams(params);
+		mContentView.setBackgroundDrawable(AppbarUtil.getDrawable(SOURCE_FLOATING_BG, context, ninePatchRect));
+		
+		mRootView = new LinearLayout(context);
+		params = new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT);
+		mRootView.setLayoutParams(params);
+
+		mShareItems.put(SOURCE_QQ_BG, addShareItemText(AppbarUtil.getDrawable(SOURCE_QQ_BG, getContext(), ninePatchRect), "QQ分享"));
+		mShareItems.put(SOURCE_QZONE_BG, addShareItemText(AppbarUtil.getDrawable(SOURCE_QZONE_BG, getContext(), ninePatchRect), "空间分享"));
+		//mShareItems.put(SOURCE_WEIXIN_BG, addShareItemText(AppbarUtil.getDrawable(SOURCE_WEIXIN_BG, getContext()), "微信分享"));
+		//mShareItems.put(SOURCE_FRIENDS_BG, addShareItemText(AppbarUtil.getDrawable(SOURCE_FRIENDS_BG, getContext()), "朋友圈分享"));
+		//微信分享暂时不加，但是需要留空白地方，所以加了两个占位符
+		//mShareItems.put(SOURCE_WEIXIN_BG, addShareItemText(null, ""));
+		//mShareItems.put(SOURCE_FRIENDS_BG, addShareItemText(null, ""));
+		
+		mContentView.addView(mRootView, params);
+		setContentView(mContentView);
+
+	}
+	
+	public int getContentViewHeight() {
+		return mContentView.getHeight();
+	}
+	
+	public View getQQItem() {
+		return mShareItems.get(SOURCE_QQ_BG);
+	}
+	
+	public View getQzoneItem() {
+		return mShareItems.get(SOURCE_QZONE_BG);
+	}
+	
+	public View getWXItem() {
+		return mShareItems.get(SOURCE_WEIXIN_BG);
+	}
+	
+	public View getTimelineItem() {
+		return mShareItems.get(SOURCE_FRIENDS_BG);
+	}
+	
+	public int getHeight() {
+		return mContentView.getHeight();
+	}
+	
+	private TextView addShareItemText(Drawable top, String text) {
+		//设置应该显示的宽高
+		if (top != null) {
+			top.setBounds(0, 0, dip2px(SHARE_ICON_SIZE), dip2px(SHARE_ICON_SIZE));
+		}
+		TextView view = new TextView(getContext());
+		view.setTextColor(Color.WHITE);
+		view.setCompoundDrawables(null, top, null, null);
+		view.setTextSize(13f);
+		view.setCompoundDrawablePadding(dip2px(8f));
+		view.setPadding(0, dip2px(19), 0, dip2px(19));
+		view.setGravity(Gravity.CENTER_HORIZONTAL);
+		view.setText(text);
+		
+		LayoutParams params = new LayoutParams(0, LayoutParams.WRAP_CONTENT);
+		params.weight = 1.0f;
+		params.gravity = Gravity.CENTER_HORIZONTAL;
+		mRootView.addView(view, params);
+		
+		addHorizontalDivider();
+		
+		return view;
+	}
+	
+	private void addHorizontalDivider() {
+		ImageView image = new ImageView(getContext());
+		image.setBackgroundColor(Color.parseColor("#33ffffff"));
+		LayoutParams params = new LayoutParams(dip2px(1f), LayoutParams.FILL_PARENT);
+		mRootView.addView(image, params);
+	}
+	
+	public int dip2px(float dpValue) {
+        return (int) (dpValue * density + 0.5f);  
+    }
+
+}

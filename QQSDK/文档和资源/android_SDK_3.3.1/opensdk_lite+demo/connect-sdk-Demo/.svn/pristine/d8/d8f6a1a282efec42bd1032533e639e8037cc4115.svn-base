@@ -1,0 +1,698 @@
+package com.tencent.open;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.app.ProgressDialog;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.os.Bundle;
+import android.text.TextUtils;
+import android.webkit.CookieSyncManager;
+import android.webkit.WebSettings;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.open.VoiceHelper.ImageCallback;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.OpenConfig;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.open.widget.OpenWebView;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+/**
+ * 社交渠道API的具体逻辑实现类，可唤起Agent或H5完成社交渠道相关API的功能，唤起Agent时，会先start一个AssistActivity，
+ * 然后start AgentActivity
+ * 
+ * @author milesxia
+ */
+public class SocialApiIml extends BaseApi {
+    private static final String TAG = SLog.TAG + ".SocialApiIml";
+
+    private Activity mActivity;
+    
+    public SocialApiIml(QQToken token) {
+        super(token);
+    }
+    
+    public SocialApiIml(QQAuth qqAuth, QQToken token) {
+        super(qqAuth, token);
+    }
+
+    /**
+     * 赠送礼物<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成赠送礼物的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void gift(Activity activity, Bundle params, IUiListener listener) {
+        askgift(activity, SocialConstants.ACTION_GIFT, params, listener);
+    }
+    
+    /**
+     * 发送请求<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送请求的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void ask(Activity activity, Bundle params, IUiListener listener) {
+        askgift(activity, SocialConstants.ACTION_ASK, params, listener);
+    }
+    
+    private void askgift(Activity activity, String action, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_FRIEND_CHOOSER);
+        //这里优先判断手Q Activity是否存在，不存在再判断手空Activity，两个旁边Activity名称不同，先这样做兼容
+        if (agentIntent == null) {
+        	SLog.i(TAG, "--askgift--friend chooser not found");
+            agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_ASK_GIFT);
+        }
+        
+        params.putAll(composeActivityParams());
+        if(SocialConstants.ACTION_ASK.equals(action)) {
+            params.putString(SocialConstants.PARAM_TYPE, SocialConstants.TYPE_REQUEST);
+        } else if(SocialConstants.ACTION_GIFT.equals(action)) {
+            params.putString(SocialConstants.PARAM_TYPE, SocialConstants.TYPE_FREEGIFT);
+        }
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_GIFT);
+        handleIntent(activity, agentIntent, action, params, h5Url, listener, false);
+    }
+    
+    /**
+     * 发送应用邀请<br>
+     * <br>
+     * 启动邀请界面，弹出SDK中openId的QQ好友列表，由用户选择目标好友，确认后向其发送安装本应用的邀请。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送邀请的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_RECEIVER}等
+     * @param listener 回调接口
+     */
+    public void invite(Activity activity, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_FRIEND_CHOOSER);
+        //这里优先判断手Q Activity是否存在，不存在再判断手空Activity，两个平台Activity名称不同，先这样做兼容
+        if (agentIntent == null) {
+        	SLog.i(TAG, "--invite--friend chooser not found");
+            agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_INVITE);
+        }
+        
+        params.putAll(composeActivityParams());
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_INVITE);
+        handleIntent(activity, agentIntent, SocialConstants.ACTION_INVITE, params, h5Url, listener, false);
+    }
+    
+    /**
+     * 发送故事<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送故事的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_APP_ICON}等
+     * @param listener 回调接口
+     */
+    public void story(Activity activity, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_STORY);
+        params.putAll(composeActivityParams());
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_SEND_STORY);
+        handleIntent(activity, agentIntent, SocialConstants.ACTION_STORY, params, h5Url, listener, false);
+    }
+    
+    private void handleIntent(final Activity activity, Intent activityIntent, String action, 
+            Bundle params, String h5Url, final IUiListener listener, boolean forceH5) {
+    	SLog.i(TAG, "-->handleIntent action = " + action + ", activityIntent = null ? " + (activityIntent == null));
+        if (activityIntent != null) {
+        	handleIntentWithAgent(activity, activityIntent, action, params, listener);
+        } else {
+        	OpenConfig config = OpenConfig.getInstance(Global.getContext(), mToken.getAppId());
+        	//应用评价和发送语音单独处理,后台配置是否支持H5登录及社交API元素
+        	boolean isLoadH5 = forceH5 || config.getBoolean("C_LoginH5");
+        	if (isLoadH5) {
+        		handleIntentWithH5(activity, action, params, h5Url, listener);
+        	} else {
+        		handleDownloadLastestQQ(activity, params, listener);
+        	}
+        }
+    }
+    
+    private void handleIntentWithAgent(Activity activity, Intent activityIntent, String action, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "-->handleIntentWithAgent action = " + action);
+    	activityIntent.putExtra(Constants.KEY_ACTION, action);
+        activityIntent.putExtra(Constants.KEY_PARAMS, params);
+        
+        UIListenerManager.getInstance().setListenerWithRequestcode(
+        		Constants.REQUEST_SOCIAL_API, listener);        
+        startAssitActivity(activity, activityIntent,Constants.REQUEST_SOCIAL_API);
+    }
+    
+    private void handleIntentWithH5(Activity activity, String action, Bundle params, String h5Url, IUiListener listener) { 
+    	SLog.i(TAG, "-->handleIntentWithH5 action = " + action);
+    	// 利用EncryptTokenListener去获取encrypt token, 获取之后利用网页进行相应动作.
+        Intent agentIntent = getTargetActivityIntent(ACTIVITY_AGENT);
+        EncryptTokenListener encryptTokenListener = new EncryptTokenListener(activity, listener, 
+                action, h5Url, params);
+        Intent encryptTokenIntent = getTargetActivityIntent(ACTIVITY_ENCRY_TOKEN);
+        // 这里要保证通过手q登录只通过手q获取加密串，通过QZone登录只通过QZone获取加密串，
+        // 因为如果通过手q登录，但从QZone获取不到加密串，这时候又通过手q登录，会进入一个循环登陆的逻辑
+        if (encryptTokenIntent != null && agentIntent != null
+                && agentIntent.getComponent() != null
+                && encryptTokenIntent.getComponent() != null
+                && agentIntent.getComponent().getPackageName()
+                        .equals(encryptTokenIntent.getComponent().getPackageName())) {
+            encryptTokenIntent.putExtra(Constants.PARAM_CONSUMER_KEY, mToken.getAppId());
+            encryptTokenIntent.putExtra(Constants.PARAM_OPEN_ID, mToken.getOpenId());
+            encryptTokenIntent.putExtra(Constants.PARAM_ACCESS_TOKEN, mToken.getAccessToken());
+            encryptTokenIntent.putExtra(Constants.KEY_ACTION, SocialConstants.ACTION_CHECK_TOKEN);
+            if (hasActivityForIntent(encryptTokenIntent)) {
+            	SLog.i(TAG, "-->handleIntentWithH5--found token activity");
+            	UIListenerManager.getInstance().setListenerWithRequestcode(
+            			Constants.REQUEST_SOCIAL_H5, encryptTokenListener);
+                startAssitActivity(activity,encryptTokenIntent,Constants.REQUEST_SOCIAL_H5);
+            }
+        } else { // 本地构造encryptToken
+        	SLog.i(TAG, "-->handleIntentWithH5--token activity not found");
+            String g_skey = "tencent&sdk&qazxc***14969%%";
+            String version = "qzone3.4";
+            String encrytoken = Util.encrypt(g_skey + mToken.getAccessToken() + mToken.getAppId()
+                    + mToken.getOpenId() + version);
+            JSONObject object = new JSONObject();
+            try {
+                object.put(SocialConstants.PARAM_ENCRY_EOKEN, encrytoken);
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            encryptTokenListener.onComplete(object);
+        }
+    }
+    
+    /**
+     * 显示功能对话框供用户与应用进行交互
+     * 
+     * @param ctx 调用者Context
+     * @param action 对话框类型，{@link SocialConstants#ACTION_LOGIN}等
+     * @param params K-V组合的参数
+     * @param listener 回调接口
+     * @return {@link SocialConstants#UI_DIALOG}
+     */
+    private void showDialog(Context ctx, String action, Bundle params, String url, 
+            IUiListener listener) {
+        SLog.v(TAG, "OpenUi, showDialog --start");
+        CookieSyncManager.createInstance(ctx);
+        params.putString(SocialConstants.PARAM_CONSUMER_KEY,
+                mToken.getAppId());
+        if (mToken.isSessionValid()) {
+            params.putString(Constants.PARAM_ACCESS_TOKEN,
+                    mToken.getAccessToken());
+        }
+        String openId = mToken.getOpenId();
+        if (openId != null) {
+            params.putString(SocialConstants.PARAM_OPEN_ID, openId);
+        }
+
+        // 从本地sharedpreference取出pf，填入params中
+        try {
+            SharedPreferences pfShared = Global.getContext().getSharedPreferences(
+                    PREFERENCE_PF,
+                    Context.MODE_PRIVATE);
+            String pf = pfShared.getString(Constants.PARAM_PLATFORM_ID,
+                    DEFAULT_PF);
+            params.putString(Constants.PARAM_PLATFORM_ID, pf);
+        } catch (Exception e) {
+            e.printStackTrace();
+            params.putString(Constants.PARAM_PLATFORM_ID, DEFAULT_PF);
+        }
+        
+        StringBuilder builder = new StringBuilder();
+        builder.append(url);
+        builder.append(HttpUtils.encodeUrl(params));
+        
+        String actionUrl = builder.toString();
+
+        SLog.d(TAG, "OpenUi, showDialog TDialog");
+        if (SocialConstants.ACTION_CHALLENGE.equals(action) || SocialConstants.ACTION_BRAG.equals(action)) {
+            SLog.d(TAG, "OpenUi, showDialog PKDialog");
+            new PKDialog(mActivity, action, actionUrl, listener, mToken).show(); //dialog context must by a activity
+        } else {
+            new TDialog(mActivity, action, actionUrl, listener, mToken).show();
+        }
+    }
+    
+    private class EncryptTokenListener implements IUiListener {
+        private IUiListener mListener;
+        private String mAction;
+        private String mUrl;
+        private Bundle mBundle;
+        private Activity activity;
+        
+        EncryptTokenListener(Activity activity, IUiListener parentListener, String action, String url, Bundle bundle) {
+            mListener = parentListener;
+            mAction = action;
+            mUrl = url;
+            mBundle = bundle;
+        }
+        
+        @Override
+        public void onComplete(Object obj) {
+            JSONObject response = (JSONObject)obj;
+            String encrytoken = null;
+            try {
+                encrytoken = response.getString(SocialConstants.PARAM_ENCRY_EOKEN);
+            } catch (JSONException e) {
+                e.printStackTrace();
+                SLog.e(TAG,
+                        "OpenApi, EncrytokenListener() onComplete error", e);
+            }
+            
+            mBundle.putString("encrytoken", encrytoken);
+            showDialog(mActivity, mAction, mBundle, mUrl, mListener);
+            
+            // 加上这个写Encrytoken的逻辑，是为了防止从QZone或者QQ中获取Encrytoken为空的情况
+            // H5页面应该优先从参数中获取Encrytoken
+            if (TextUtils.isEmpty(encrytoken)) {
+                SLog.d(TAG, "The token get from qq or qzone is empty. Write temp token to localstorage.");
+                writeEncryToken(activity);
+            }
+        }
+
+        @Override
+        public void onError(UiError e) {
+            SLog.d(TAG,
+                    "OpenApi, EncryptTokenListener() onError" + e.errorMessage);
+            mListener.onError(e);
+        }
+
+        @Override
+        public void onCancel() {
+            mListener.onCancel();
+        }
+    }
+    
+    @SuppressLint("SetJavaScriptEnabled")
+    public void writeEncryToken(Context context) {
+        String g_skey = "tencent&sdk&qazxc***14969%%";
+        String token = mToken.getAccessToken();
+        String appid = mToken.getAppId();
+        String openid = mToken.getOpenId();
+        String version = "qzone3.4";
+        String encryToken = null;
+        if (token != null && token.length() > 0 && appid != null && appid.length() > 0
+                && openid != null && openid.length() > 0) {
+            encryToken = Util.encrypt(g_skey + token + appid + openid + version);
+        }
+        OpenWebView localWebView = new OpenWebView(context);
+        WebSettings localWebSettings = localWebView.getSettings();
+        localWebSettings.setDomStorageEnabled(true);
+        localWebSettings.setJavaScriptEnabled(true);
+        localWebSettings.setDatabaseEnabled(true);
+        
+        String body = "<!DOCTYPE HTML><html lang=\"en-US\">"
+                +
+                "<head><meta charset=\"UTF-8\"><title>localStorage Test</title><script type=\"text/javascript\">"
+                +
+                "document.domain = 'qq.com';localStorage[\"" + mToken.getOpenId() + "_"
+                + mToken.getAppId() + "\"]=\"" + encryToken
+                + "\";</script></head><body></body></html>";
+        String localStorageUrl = ServerSetting.getInstance().getEnvUrl(
+                context, ServerSetting.DEFAULT_LOCAL_STORAGE_URI);
+        localWebView.loadDataWithBaseURL(localStorageUrl, body, "text/html", "utf-8",
+                localStorageUrl);
+    }
+
+	@Override
+	protected Intent getTargetActivityIntent(String targetActivity) {
+		Intent qzone_intent = new Intent();
+		qzone_intent.setClassName(Constants.PACKAGE_QZONE, targetActivity);
+		Intent qq_intent = new Intent();
+		qq_intent.setClassName(Constants.PACKAGE_QQ, targetActivity);
+		Intent hd_qq_intent = new Intent();
+		hd_qq_intent.setClassName(Constants.PACKAGE_QQ_PAD, targetActivity);
+		
+		if (Util.isTablet(Global.getContext()) && SystemUtils.isActivityExist(Global.getContext(), hd_qq_intent)) {
+			return hd_qq_intent;
+		}
+		
+		if (SystemUtils.isActivityExist(Global.getContext(), qq_intent) &&
+				SystemUtils.compareQQVersion(Global.getContext(), "4.7") >= 0) {
+			return qq_intent;
+		}
+		
+		if (SystemUtils.isActivityExist(Global.getContext(), qzone_intent)) {
+			String qzoneVersion = SystemUtils.getAppVersionName(Global.getContext(), Constants.PACKAGE_QZONE);
+			if (SystemUtils.compareVersion(qzoneVersion, "4.2") >= 0) {
+				return SystemUtils.isAppSignatureValid(Global.getContext(), qzone_intent.getComponent()
+                                .getPackageName(), Constants.SIGNATRUE_QZONE) ? qzone_intent : null;
+			}
+		}
+		return null;
+	}
+	
+	//-----------------------------------
+    //下面的注释请勿删除，编译lite版的时候需要删除[liteexludestart] [liteexludeend]区间的代码
+    //[liteexludestart]
+	private void dismissProgressDl () {
+		if (!mActivity.isFinishing() && mProgressDialog != null && mProgressDialog.isShowing()) {
+			mProgressDialog.dismiss();
+			mProgressDialog = null;
+		}
+    }
+	
+	protected boolean isCheckFunctionEnabled() {
+		Intent qzone_intent = new Intent();
+		String checkFunction = SocialConstants.ACTIVITY_CHECK_FUNCTION /*"com.tencent.open.agent.CheckFunctionActivity"*/;
+		qzone_intent.setClassName(Constants.PACKAGE_QZONE, checkFunction);
+		//temp modify
+		return SystemUtils.isActivityExist(Global.getContext(), qzone_intent);
+		//return true;
+		
+	}
+	
+	protected void getTargetActivityIntentForNew(Activity activity,String action, IUiListener listener) {
+		//异步操作，要有进度对话框
+		 
+		Intent intent = new Intent();
+		intent.setClassName(Constants.PACKAGE_QZONE, ACTIVITY_AGENT);
+		
+		intent.putExtra(Constants.KEY_ACTION, "action_check");
+		Bundle params = new Bundle();
+		params.putString("apiName", action); 
+		
+		intent.putExtra(Constants.KEY_PARAMS, params);
+		
+		UIListenerManager.getInstance().setListenerWithRequestcode(
+				Constants.REQUEST_SOCIAL_API, listener);
+		startAssitActivity(activity,intent,Constants.REQUEST_SOCIAL_API);
+		
+	}
+	
+	//保存查询后启动Activity所需要的参数。
+    private static class DelayStartParam {
+    	Intent agentIntent;
+    	String action;
+    	Bundle params;
+    	String h5Url;
+    	IUiListener listener;
+    	
+    	public DelayStartParam() {
+    		
+    	}
+    }
+	
+	private DelayStartParam generateDelayStParam (Bundle params,String action, String h5Url,IUiListener listener) {
+        Intent intent = new Intent();
+        intent.setClassName(Constants.PACKAGE_QZONE, ACTIVITY_AGENT);   //just for qzone
+        
+        DelayStartParam dyStartParm = new DelayStartParam();
+
+		dyStartParm.agentIntent = intent;
+    	dyStartParm.params = params;
+    	dyStartParm.h5Url = h5Url;
+    	dyStartParm.listener = listener;
+    	dyStartParm.action = action;
+		return dyStartParm;
+    }
+	
+	/**
+     * 好友召回<br>
+     * <br>
+     * 启动好友召回界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送请求的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void reactive(Activity activity, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_FRIEND_CHOOSER);
+        //这里优先判断手Q Activity是否存在，不存在再判断手空Activity，两个旁边Activity名称不同，先这样做兼容
+        if (agentIntent == null) {
+            agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_REACTIVE);
+        }
+        params.putAll(composeActivityParams());
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_REACTIVE);
+        if (agentIntent == null && isCheckFunctionEnabled()) {
+            mProgressDialog = new ProgressDialog(activity);
+            mProgressDialog.setMessage("请稍候...");
+            mProgressDialog.show();
+
+            //params.remove(SocialConstants.PARAM_SEND_IMG);
+            params.putString(SocialConstants.PARAM_TYPE, SocialConstants.TYPE_REACTIVE);
+            DelayStartParam dyStartParm = generateDelayStParam(params, SocialConstants.ACTION_REACTIVE, h5Url, listener);
+            getTargetActivityIntentForNew(activity,
+                    SocialConstants.ACTION_REACTIVE, new CheckListener(dyStartParm));
+            return;
+        }
+        String sendImg = params.getString(SocialConstants.PARAM_IMG_URL);
+        params.putString(SocialConstants.PARAM_SEND_IMG, sendImg);
+        params.putString(SocialConstants.PARAM_TYPE, SocialConstants.TYPE_REACTIVE);
+        params.remove(SocialConstants.PARAM_IMG_URL);
+        handleIntent(activity, agentIntent, SocialConstants.ACTION_REACTIVE, params, h5Url, listener, false);
+    }
+    
+    /**
+     * 向好友炫耀<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送炫耀的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void brag(Activity activity, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_BRAG);
+        params.putAll(composeActivityParams());
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_BRAG);
+        handleIntent(activity, agentIntent, SocialConstants.ACTION_BRAG, params, h5Url, listener, false);
+    }
+    
+    /**
+     * 发送挑战<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送挑战的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_COMMENT}等
+     * @param listener 回调接口
+     */
+    public void challenge(Activity activity, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_CHALLENGE);
+        params.putAll(composeActivityParams());
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_BRAG);
+        handleIntent(activity, agentIntent, SocialConstants.ACTION_CHALLENGE, params, h5Url, listener, false);
+    }
+    
+    /**
+     * 应用评价<br>
+     * <br>
+     * 启动发送界面，应用可以预定义一些信息，在用户编辑确认后，发送到QQ各平台<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成应用评价的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_APP_ICON}等
+     * @param listener 回调接口
+     */
+    public void grade(Activity activity, Bundle params, IUiListener listener) {
+        mActivity = activity;
+        // TODO QZone4.0插件化后，这里的判断方式需要修改！
+        params.putAll(composeActivityParams());
+        params.putString("version", Util.getAppVersion(activity));
+        
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_GRADE/*SocialConstants.ACTIVITY_STORY*/);
+        String h5Url = "http://qzs.qq.com/open/mobile/rate/sdk_rate.html?";
+        if (agentIntent == null && isCheckFunctionEnabled()) {
+            //此处要显示进度对话框
+            mProgressDialog = new ProgressDialog(activity);
+            //mProgressDialog.setTitle("请稍候，正查询");
+            mProgressDialog.setMessage("请稍候...");
+            mProgressDialog.show();
+            
+            DelayStartParam dyStartParm = generateDelayStParam(params,SocialConstants.ACTION_GRADE,h5Url,listener);
+            getTargetActivityIntentForNew(activity,SocialConstants.ACTION_GRADE, new CheckListener(dyStartParm));
+        } else {
+            handleIntent(activity, agentIntent, SocialConstants.ACTION_GRADE, params, h5Url, listener, true);
+        }
+
+    }
+	
+    /**
+     * 语音API
+     */
+	protected class CheckListener implements IUiListener {
+		DelayStartParam delayStartParam;
+		
+		public CheckListener(DelayStartParam delayStartParam) {
+			this.delayStartParam = delayStartParam;
+		}
+
+		@Override
+		public void onComplete(Object response) {
+			boolean exist = false;
+			if (response != null) {
+				JSONObject json = (JSONObject)response;
+				try {
+					exist = json.getBoolean("check_result");
+				} catch (JSONException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+			}
+			
+			dismissProgressDl();
+			
+			if (exist) {
+				handleIntentWithAgent(mActivity, delayStartParam.agentIntent, delayStartParam.action,
+						delayStartParam.params, delayStartParam.listener);
+			} else {
+			    VoiceHelper.clearImageCacheFile(delayStartParam.params.getString(SocialConstants.PARAM_IMG_DATA));
+			    handleIntentWithH5(mActivity, delayStartParam.action, delayStartParam.params,
+			    		delayStartParam.h5Url, delayStartParam.listener);
+			}
+		}
+
+		@Override
+		public void onError(UiError e) {
+			dismissProgressDl();
+			VoiceHelper.clearImageCacheFile(delayStartParam.params.getString(SocialConstants.PARAM_IMG_DATA));
+			handleIntentWithH5(mActivity, delayStartParam.action, delayStartParam.params,
+		    		delayStartParam.h5Url, delayStartParam.listener);
+		}
+
+		@Override
+		public void onCancel() {
+			dismissProgressDl();
+			VoiceHelper.clearImageCacheFile(delayStartParam.params.getString(SocialConstants.PARAM_IMG_DATA));
+		}
+		
+	}
+    
+	/**
+     * 发送应用邀请<br>
+     * <br>
+     * 启动邀请界面，弹出SDK中openId的QQ好友列表，由用户选择目标好友，确认后向其发送安装本应用的邀请。<br>
+     * <br>
+     * 当安装腾讯其他应用时，SDK会优先启用腾讯应用中的特定Activity，通过此Activity完成发送邀请的功能。 当没有找到此Activity时
+     * ，SDK会显示一个包含WebView的对话框，通过Web交互来完成功能。<br>
+     * 
+     * @param activity 调用者Activity。
+     * @param params 参看{@link SocialConstants#PARAM_RECEIVER}等
+     * @param listener 回调接口
+     */
+    public void voice(final Activity activity, final Bundle params, final IUiListener listener) {
+        mActivity = activity;
+        params.putAll(composeActivityParams());
+        params.putString("version", Util.getAppVersion(activity));
+        
+        if(!VoiceHelper.hasSDCard()){
+        	SLog.i(TAG, "voice no SDCard");
+            UiError error = new UiError(Constants.ERROR_NO_SDCARD, Constants.MSG_NO_SDCARD, Constants.MSG_NO_SDCARD);
+            listener.onError(error);
+            return;
+        }
+        
+        if(params.containsKey(SocialConstants.PARAM_IMG_DATA)){
+            Bitmap image = (Bitmap)params.getParcelable(SocialConstants.PARAM_IMG_DATA);
+            
+            if(image != null){
+                
+                //此处要显示进度对话框
+                mProgressDialog = new ProgressDialog(activity);
+                mProgressDialog.setMessage("请稍候...");
+                mProgressDialog.show();
+                
+                new VoiceHelper(new ImageCallback() {
+                    
+                    @Override
+                    public void onSuccess(String filePath) {
+                        params.remove(SocialConstants.PARAM_IMG_DATA);
+                        
+                        if(!TextUtils.isEmpty(filePath)){
+                            params.putString(SocialConstants.PARAM_IMG_DATA, filePath);
+                        }
+                        startVoiceView(activity, params, listener);
+                    }
+                    
+                    @Override
+                    public void onFailed(String failMessage) {
+                        params.remove(SocialConstants.PARAM_IMG_DATA);
+                        UiError error = new UiError(Constants.ERROR_PARAM, Constants.MSG_IMAGE_ERROR, Constants.MSG_IMAGE_ERROR);
+                        listener.onError(error);
+                        dismissProgressDl();
+                    }
+                }).execute(image);
+                return;
+            }
+        } 
+           
+        startVoiceView(activity, params, listener);    
+    }
+
+    /**
+     * 判断启动语音API界面
+     * 
+     * @param activity
+     * @param params
+     * @param listener
+     */
+    private void startVoiceView(Activity activity, Bundle params, IUiListener listener){
+        //只支持手空
+        Intent agentIntent = getAgentIntentWithTarget(SocialConstants.ACTIVITY_VOICE);
+        String h5Url = ServerSetting.getInstance().getEnvUrl(Global.getContext(), ServerSetting.DEFAULT_URL_VOICE);
+        if (agentIntent == null && isCheckFunctionEnabled()) {
+            if(mProgressDialog == null || !mProgressDialog.isShowing()){
+                mProgressDialog = new ProgressDialog(activity);
+                mProgressDialog.setTitle("请稍候");
+                mProgressDialog.show();
+            }
+            
+            DelayStartParam dyStartParm = generateDelayStParam(params, SocialConstants.ACTION_VOICE, h5Url,listener);
+            getTargetActivityIntentForNew(activity,SocialConstants.ACTION_VOICE, new CheckListener(dyStartParm));
+        } else {
+            //无手空的情况下,会跳H5引导下载受手空,所以forceH5为true
+            handleIntent(activity, agentIntent, SocialConstants.ACTION_VOICE, params, h5Url, listener, true);
+        }
+    }
+    //[liteexludeend]
+	
+}

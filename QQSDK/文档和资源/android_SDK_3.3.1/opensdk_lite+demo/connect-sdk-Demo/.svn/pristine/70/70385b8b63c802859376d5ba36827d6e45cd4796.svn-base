@@ -1,0 +1,77 @@
+package com.tencent.open.web.security;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.webkit.WebView;
+
+import com.tencent.open.JsBridge.JsBridgeListener;
+import com.tencent.open.log.SLog;
+import com.tencent.open.widget.SecureWebView;
+
+public class SecureJsListener extends JsBridgeListener {
+	private static final String TAG = SLog.TAG + ".SecureJsListener";
+	private String mCallBack;
+	
+	public static final int RESULT_OK = 0;
+	public static final int RESULT_None = -1;	
+	public static final int RESULT_Java_Exception = -2;
+	public static final int RESULT_IllegalArgument = -3;
+	/**
+	 * 当前设备不支持自定义输入通道
+	 */
+	public static final int RESULT_DEVICE_NOT_SUPPORT = -4;
+
+	public SecureJsListener(WebView wv, long sn, String url, String callback) {
+		super(wv, sn, url);
+		
+		mCallBack = callback;
+	}
+
+	@Override
+	public void onComplete(Object result) {
+		SLog.v(TAG, "-->onComplete, result: " + result);
+	}
+
+	@Override
+	public void onNoMatchMethod() {
+		SLog.d(TAG, "-->onNoMatchMethod...");
+	}
+
+	@Override
+	public void onCustomCallback(String js) {
+		SLog.v(TAG, "-->onCustomCallback, js: " + js);
+		JSONObject obj = new JSONObject();
+		
+		int result = 0;
+		if (!SecureWebView.sDeviceSupport) {
+			result = RESULT_DEVICE_NOT_SUPPORT;
+		}
+		try {
+			obj.put("result", result);
+			obj.put("sn", sn);
+			obj.put("data", js);
+		} catch (JSONException e) {
+			e.printStackTrace();
+		}
+		
+		callback(obj.toString());
+	}
+	
+	private void callback(String result) {
+		WebView view = webViewRef.get();
+		if (view != null) {
+			StringBuffer sb = new StringBuffer("javascript:");
+			sb.append("if(!!").append(mCallBack).append("){");
+			sb.append(mCallBack);
+			sb.append("(");
+			sb.append(result);
+			sb.append(")}");
+			
+			String callback = sb.toString();
+			SLog.v(TAG, "-->callback, callback: " + callback);
+			view.loadUrl(callback);
+		}
+	}
+
+}

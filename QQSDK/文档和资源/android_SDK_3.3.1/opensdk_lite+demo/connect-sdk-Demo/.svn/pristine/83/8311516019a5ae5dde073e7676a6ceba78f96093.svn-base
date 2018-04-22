@@ -1,0 +1,76 @@
+package com.tencent.open;
+
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.SocketTimeoutException;
+
+import org.apache.http.conn.ConnectTimeoutException;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import com.tencent.tauth.IRequestListener;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.utils.HttpUtils.HttpStatusException;
+import com.tencent.open.utils.HttpUtils.NetworkUnavailableException;
+
+public class TaskRequestListener implements IRequestListener {
+	private IUiListener lis;
+	public TaskRequestListener(IUiListener listener) {
+		lis = listener;
+	}
+
+	@Override
+	public void onComplete(JSONObject response) {
+		if (lis != null) {
+			lis.onComplete(response);
+		}
+	}
+
+	@Override
+	public void onIOException(IOException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onMalformedURLException(MalformedURLException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onJSONException(JSONException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onConnectTimeoutException(ConnectTimeoutException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onSocketTimeoutException(SocketTimeoutException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onNetworkUnavailableException(NetworkUnavailableException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onHttpStatusException(HttpStatusException e) {
+		handleException(e);
+	}
+
+	@Override
+	public void onUnknowException(Exception e) {
+		handleException(e);
+	}
+	
+	private void handleException(Exception e) {
+		if (lis != null) {
+			lis.onError(new UiError(100, e.getMessage(), null));
+		}
+	}
+
+}

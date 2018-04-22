@@ -1,0 +1,183 @@
+# -*- coding=UTF-8 -*-
+'''
+Created on 2014年1月14日
+@author: ravenzhang
+@todo: 各业务的插桩脚本都要调用的公共代码，如：加密，基本的插桩等
+'''
+import  os,stat;
+from javacodeparse.JavaCodeParser import JavaFile;
+import time;
+import  base64;
+
+#import  pyDes;
+from pyDes import pyDes;
+
+import  multiprocessing;
+class MultiProcessorWraper(object):
+    def __init__(self):
+        processor_num = multiprocessing.cpu_count();
+        poo_size = processor_num-1 if processor_num>1 else 1;
+        self.pool = multiprocessing.Pool( poo_size );
+        self.results_list = []
+    
+    def add_job(self, func, t_para):
+        self.results_list.append(
+                self.pool.apply_async(func, args=t_para));
+                
+    def join_jobs(self):
+        results = [];
+        self.pool.close()
+        self.pool.join()
+        for result in self.results_list:
+            results.append(result.get())
+        return results;
+
+class Des:
+    '''
+    @todo: 实现加密/解密的类
+    '''
+    def __init__(self, key='crowtest'):
+        self.des_obj = pyDes.des(key, padmode=pyDes.PAD_PKCS5);
+    
+    def encrypt(self, data):
+        ''' 
+        @todo: 加密（对数据先进行DES加密，再进行base64转码
+        @param data(str): 要加密的数据（明文）
+        @return: 加密后的数据 （密文）
+        '''
+        return base64.b64encode(self.des_obj.encrypt(data));
+   
+    def decrypt(self, data):
+        ''' 
+        @todo: 解密（上面方法的反函数）
+        @param data(str):密文
+        @return: 明文 
+        '''
+        return self.des_obj.decrypt( base64.b64decode(data));
+    
+des = Des();
+#-------------------------------------------------------------
+#功能：对单个文件插桩（一般不应单独调用，是被下面的函数调用）
+#1.filename：需要插桩的文件名字
+#返回：插桩的函数个数（如果和文件中本身的函数个数不匹配，会抛异常）
+#-------------------------------------------------------------
+def doInsert(filename, package='', packageLst=[], willEncrypt=False):
+    if( not filename.endswith(".java") ):
+        return 0;
+    print 'will:',filename;
+    javaFile = JavaFile(filename);
+    if (len(packageLst)>0 and javaFile.package not in packageLst):
+        return 0;
+    shouldnum,allFuncInfo = javaFile.getAllFuncInfoDict();
+    if ( len(allFuncInfo) == 0 ):
+        return 0;
+    changelines = 0;
+
+    #读文件内容到列表
+    with open(filename) as fl:
+        fileContents = fl.read().splitlines();
+
+    if (package not in javaFile.imports):
+        #防止重复引入包
+        for index,line in enumerate(fileContents):
+            temp_l = line.lstrip().split();
+            if ( temp_l and temp_l[0] == "package" ):
+                fileContents[index] = "%simport %s.PreciseLogCat_raven;" % (line,package) ;
+                break;
+    
+    for func in allFuncInfo:
+        lineIndex = func['startline']-1;
+        line = fileContents[lineIndex];
+        funcpos = func["startpos"];
+        while(line[funcpos-1] != func["startChar"]):
+            funcpos += 1;
+        #是否加密
+        funcname = des.encrypt( func["name"] ) if willEncrypt else func["name"];
+        if ( func["isStatic"] or func["isConstructor"] ):
+            sInsert = '''PreciseLogCat_raven.instance().log("%s");''' % (funcname);
+        else:
+            sInsert = '''PreciseLogCat_raven.instance().log(this,"%s");''' % (funcname);
+#         print '    func:', func["name"];
+        
+        #防止重复插桩
+        if ( line[funcpos:].find(sInsert) == -1 ):
+            fileContents[lineIndex] = line[0:funcpos] + sInsert + line[funcpos:];
+        changelines += 1; 
+        
+    #改变文件属性，写入新文件内容
+    if not os.access(filename, os.W_OK):
+        os.chmod( filename, os.stat(filename).st_mode | stat.S_IWRITE )
+    with open(filename,"w") as fFile:
+        fFile.write("\n".join(fileContents));
+
+    #校验一下是不是所有函数都被插桩，理论上不会抛出这样的异常！
+    if ( len(allFuncInfo) != changelines ):
+        print len(allFuncInfo),allFuncInfo;
+        print changelines;
+        raise Exception("Not Enough!");
+    return changelines;
+   
+        
+#-------------------------------------------------------------
+#功能：以文件名列表作为插桩的判断依据来进行插桩，适应场景是文件离散存放（如sdk项目）
+#1.fileLst：所有文件列表
+#2.packageLst：若指定则只对这些包内的文件进行插桩
+#返回：插桩的总函数个数
+#-------------------------------------------------------------
+def insert_byFiles(fileLst,packageLst=[]):
+    funcnum = 0;
+    for filename in fileLst:
+        if( not os.path.exists(filename) ):
+            print "not a file:",filename;
+        else:
+            funcnum += doInsert(filename,packageLst);
+    print "done!"
+    return funcnum;
+
+#-------------------------------------------------------------
+#功能：对目录下的所有文件进行插桩，适应文件存放在一起的情况（如appstore）
+#1.rootDir：要插桩的所有文件的根目录
+#2.packageLst：若指定则只对这些包内的文件进行插桩
+#返回：插桩的函数总个数
+#-------------------------------------------------------------
+def insert_byPath(rootDir, package='', packageLst=[], fileNameFilter=None, willEncrypt=False):
+    filenum = 0;
+    funcnum = 0;
+    begin_time = time.time();
+    mp = MultiProcessorWraper();
+    for root,dirs,files in os.walk(rootDir):
+        for f in files:
+            filename = os.path.join(root,f);
+            if ( fileNameFilter and not fileNameFilter(filename) ):
+                continue;
+            mp.add_job(doInsert, (filename,package, packageLst,willEncrypt) );
+    results = mp.join_jobs();
+    for result in results:
+        if result:
+            filenum += 1;
+            funcnum += result;
+    cost_time = time.time() - begin_time;
+    print "----insert files:%s, insert funcs:%s, cost seconds:%s----" % (filenum,funcnum,cost_time);
+    return funcnum;
+
+if __name__ == "__main__":
+#     insert_byFiles([r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\src\com\etrump\mixlayout\ETFont.java']);
+
+#     insert_byFiles([r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\cooperation\cooperation\qwallet\open\PayApi.java']);
+#     exit(0);
+
+    insert_byPath(r'D:\TencentSVN\B2\AndroidQQ_5.0_Trunk\QQLite\qsmartdevice');
+    exit(0);
+
+    import time;
+    des = Des();
+    count = 6000;
+    pre = time.time();
+    for i in range(count):
+        secret = des.encrypt('com.tencent.open.agent(int,int)');
+    print 'encrypt times:', count
+    print 'cost time:', time.time()-pre;
+    print 'encrypt:', secret;
+    origin = des.decrypt(secret);
+    print 'origin:', origin;
+    

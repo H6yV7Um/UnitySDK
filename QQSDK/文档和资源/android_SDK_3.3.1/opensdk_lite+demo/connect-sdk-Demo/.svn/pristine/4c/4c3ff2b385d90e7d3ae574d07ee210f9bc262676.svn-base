@@ -1,0 +1,1249 @@
+
+package com.tencent.open.utils;
+
+import android.app.AlertDialog.Builder;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.Signature;
+import android.location.Criteria;
+import android.location.Location;
+import android.location.LocationManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Environment;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
+
+import com.tencent.connect.common.Constants;
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.APNUtil;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.File;
+import java.io.UnsupportedEncodingException;
+import java.net.InetAddress;
+import java.net.MalformedURLException;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.net.URL;
+import java.net.URLDecoder;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Enumeration;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class Util {
+
+    private static final String TAG = SLog.TAG + ".Util";
+
+    //private static final String ENDLINE = "\r\n";
+
+    //private static final String BOUNDRY = "3i2ndDfv2rTHiSisAbouNdArYfORhtTPEefj3q2f";
+
+    /**
+     * 取得AppInfo 信息
+     */
+    private static String mAppVersionName = "";
+    private static String mVersionName = "";
+    private static String mQua3 = "";
+    private static String mBuildNum = "";
+    private static int mVersionCode = -1;
+
+    /**
+     * 获取经纬度信息
+     */
+    private static String location;
+
+    /**
+     * Set this to true to enable log output. Remember to turn this back off
+     * before releasing. Sending sensitive data to log is a security risk.
+     */
+//    private static boolean ENABLE_LOG = true;
+
+    /**
+     * Generate the multi-part post body providing the parameters and boundary
+     * string
+     *
+     * @param parameters the parameters need to be posted
+     * @param boundary the random string as boundary
+     * @return a string of the post body
+     */
+    /*public static String encodePostBody(Bundle parameters, String boundary) {
+        if (parameters == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int dataparamHandleCount = -1;
+        int dataparamSize = parameters.size();
+        for (String key : parameters.keySet()) {
+            dataparamHandleCount++;
+            Object parameter = parameters.get(key);
+            if (!(parameter instanceof String)) {
+                continue;
+            }
+
+            sb.append("Content-Disposition: form-data; name=\"" + key
+                    + "\"" + ENDLINE + ENDLINE + (String) parameter);
+            if (dataparamHandleCount < dataparamSize - 1) {
+                sb.append(ENDLINE + "--" + boundary + ENDLINE);
+            }
+
+        }
+
+        return sb.toString();
+    }*/
+
+    /*public static String encodeUrl(Bundle parameters) {
+        if (parameters == null) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (String key : parameters.keySet()) {
+            Object parameter = parameters.get(key);
+            if (!(parameter instanceof String)
+                    && !(parameter instanceof String[])) {
+                continue;
+            }
+            if (parameter instanceof String[]) {
+                if (first) {
+                    first = false;
+                } else {
+                    sb.append("&");
+                }
+                sb.append(URLEncoder.encode(key) + "=");
+                String[] stArray = parameters.getStringArray(key);
+                if (stArray != null) {
+	                for (int index = 0; index < stArray.length; index++) {
+	                    if (index == 0) {
+                            sb.append(URLEncoder.encode(stArray[index]));
+                        } else {
+                            sb.append(URLEncoder.encode("," + stArray[index]));
+                        }
+	                }
+                }
+            } else {
+                if (first) {
+                    first = false;
+                } else {
+                    sb.append("&");
+                }
+                sb.append(URLEncoder.encode(key) + "="
+                        + URLEncoder.encode(parameters.getString(key)));
+            }
+        }
+        return sb.toString();
+    }*/
+
+    public static Bundle decodeUrl(String s) {
+        Bundle params = new Bundle();
+        try {
+            if (s != null) {
+                String array[] = s.split("&");
+                for (String parameter : array) {
+                    String v[] = parameter.split("=");
+                    if (v.length == 2) {
+                        params.putString(URLDecoder.decode(v[0]), URLDecoder.decode(v[1]));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            params = null;
+        }
+        return params;
+    }
+
+    public static JSONObject decodeUrlToJson(JSONObject obj, String s) {
+        if (obj == null) {
+            obj = new JSONObject();
+        }
+        if (s != null) {
+            String array[] = s.split("&");
+            for (String parameter : array) {
+                String v[] = parameter.split("=");
+                if (v.length == 2) {
+                    try {
+                        //seezhang.modify.begin-RDM:java.lang.IllegalArgumentException: Invalid % sequence at 0: %
+                        try {
+                            v[0] = URLDecoder.decode(v[0]);
+                            v[1] = URLDecoder.decode(v[1]);
+                        } catch (Exception e) {
+                        }
+                        obj.put(v[0], v[1]);
+                        //seezhang.modify.end
+                    } catch (JSONException e) {
+                        SLog.e(TAG, "decodeUrlToJson has exception: " + e.getMessage());
+                    }
+                }
+            }
+        }
+        return obj;
+    }
+
+    /**
+     * Parse a URL query and fragment parameters into a key-value bundle.
+     *
+     * @param url the URL to parse
+     * @return a dictionary bundle of keys and values
+     */
+    public static Bundle parseUrl(String url) {
+        // hack to prevent MalformedURLException
+        url = url.replace("auth://", "http://");
+        try {
+            URL u = new URL(url);
+            Bundle b = decodeUrl(u.getQuery());
+            b.putAll(decodeUrl(u.getRef()));
+            return b;
+        } catch (MalformedURLException e) {
+            return new Bundle();
+        }
+    }
+
+    public static JSONObject parseUrlToJson(String url) {
+        // hack to prevent MalformedURLException
+        url = url.replace("auth://", "http://");
+        try {
+            URL u = new URL(url);
+            JSONObject b = decodeUrlToJson(null, u.getQuery());
+            decodeUrlToJson(b, u.getRef());
+            return b;
+        } catch (MalformedURLException e) {
+            return new JSONObject();
+        }
+    }
+
+    public static class Statistic {
+        public Statistic(String response2, int size) {
+            response = response2;
+            reqSize = size;
+            if (response != null) {
+                rspSize = response.length();
+            }
+        }
+
+        public String response;
+
+        public long reqSize;
+
+        public long rspSize;
+    }
+
+    /*@SuppressWarnings("unused")
+    private static class TBufferedOutputStream extends BufferedOutputStream {
+
+        private int mLength;
+
+        public TBufferedOutputStream(OutputStream out) {
+            super(out);
+            mLength = 0;
+        }
+
+        @Override
+        public void write(byte[] buffer) throws IOException {
+            super.write(buffer);
+            mLength += buffer.length;
+        }
+
+        public int getLength() {
+            return mLength;
+        }
+    }*/
+
+    private static final int SET_CONNECTION_TIMEOUT = 15 * 1000;
+
+    private static final int SET_SOCKET_TIMEOUT = 30 * 1000;
+
+    /**
+     *
+     */
+    /*public static Statistic upload(Context ctx, String url, Bundle paramsIN)
+            throws MalformedURLException, IOException, NetworkUnavailableException,
+            HttpStatusException {
+
+        // add by todd 2013-1-9, 判断网络是否可用 -->>
+        if (ctx != null) {
+            ConnectivityManager cnMgr = (ConnectivityManager) ctx
+                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cnMgr != null) {
+                NetworkInfo info = cnMgr.getActiveNetworkInfo();
+                if (info == null || !info.isAvailable()) {
+                    // 网络不可用，抛出异常
+                    throw new NetworkUnavailableException(NetworkUnavailableException.ERROR_INFO);
+                }
+            }
+        }
+
+        Bundle params = new Bundle(paramsIN);
+        String result = "";
+        String appidString = params.getString("appid_for_getting_config");
+        params.remove("appid_for_getting_config");
+        HttpClient client = HttpUtils.getHttpClient(ctx, appidString, url);
+        HttpUriRequest request = null;*/
+        /*
+        // 请求的接口加上设备和sdk信息
+        Bundle urlParams = new Bundle();
+        urlParams.putString("status_os", android.os.Build.VERSION.RELEASE);
+        urlParams.putString("status_machine", android.os.Build.MODEL);
+        urlParams.putString("status_version", android.os.Build.VERSION.SDK);
+        urlParams.putString("sdkv", Constants.SDK_VERSION);
+        urlParams.putString("sdkp", "a");
+        if (url.indexOf("?") == -1) {
+            url = url + "?";
+        } else {
+            url = url + "&";
+        }
+        url = url + encodeUrl(urlParams);
+
+        int reqSize = url.length();
+*/
+        /*int reqSize = 0;
+        HttpPost post = new HttpPost(url);
+        //post.addHeader("Accept-Encoding", "gzip");
+        Bundle dataparams = new Bundle();
+        for (String key : params.keySet()) {
+            Object parameter = params.get(key);
+            if (parameter instanceof byte[]) {
+                dataparams.putByteArray(key, (byte[]) parameter);
+            }
+        }
+        post.setHeader("Content-Type", "multipart/form-data; boundary="
+                + BOUNDRY);
+        post.setHeader("Connection", "Keep-Alive");
+        ByteArrayOutputStream os = new ByteArrayOutputStream();
+
+        os.write(getBytesUTF8("--" + BOUNDRY + ENDLINE));
+        os.write(getBytesUTF8(encodePostBody(params, BOUNDRY)));
+        // 1. 这里多了一行, 会导致common-upload 会无法接收到上传的文件
+        // 且 encodePostBody 已经会在每个参数后面输出一行 BOUNDRY, 这里就没必要再输出个了
+        // os.write((ENDLINE + "--" + BOUNDRY + ENDLINE).getBytes());
+
+
+        if (!dataparams.isEmpty()) {
+            int dataparamSize = dataparams.size();
+            int dataparamHandleCount = -1;
+            os.write(getBytesUTF8(ENDLINE + "--" + BOUNDRY + ENDLINE));
+            for (String key : dataparams.keySet()) {
+                dataparamHandleCount++;
+                // 2. 如果不传 name 字段, 同样会导致 common-upload 无法接收文件
+                os.write(getBytesUTF8("Content-Disposition: form-data; name=\""
+                        + key + "\"; filename=\""
+                        + "value.file" + "\"" + ENDLINE));
+                os.write(getBytesUTF8("Content-Type: application/octet-stream" + ENDLINE + ENDLINE));
+                byte[] data = dataparams.getByteArray(key);
+                if (data != null) {
+                	os.write(data);
+                }
+                if (dataparamHandleCount < dataparamSize - 1) {
+                    os.write(getBytesUTF8(ENDLINE + "--" + BOUNDRY + ENDLINE));
+                }
+
+            }
+        }
+        // 3. 最后一个 boundry 要有个 "--" 来标志结束, 否则导致 common-upload 无法接收文件
+        os.write(getBytesUTF8(ENDLINE + "--" + BOUNDRY + "--" + ENDLINE));
+        byte[] data = os.toByteArray();
+        reqSize += data.length;
+        os.close();
+        ByteArrayEntity formEntity = new ByteArrayEntity(data);
+        post.setEntity(formEntity);
+        request = post;
+
+        HttpResponse response = client.execute(request);
+        StatusLine status = response.getStatusLine();
+        int statusCode = status.getStatusCode();
+
+        if (statusCode == 200) {
+            result = readHttpResponse(response);
+        } else {
+            // 将具体的http返回码进行上报
+            throw new HttpStatusException(HttpStatusException.ERROR_INFO + statusCode);
+        }
+
+        return new Statistic(result, reqSize);
+    }*/
+
+    /**
+     * 读取HttpResponse数据
+     *
+     * @param response
+     * @return
+     * @throws IOException
+     * @throws IllegalStateException
+     */
+    /*private static String readHttpResponse(HttpResponse response)
+            throws IllegalStateException, IOException {
+        String result = "";
+        HttpEntity entity = response.getEntity();
+        InputStream inputStream;
+        inputStream = entity.getContent();
+        ByteArrayOutputStream content = new ByteArrayOutputStream();
+
+        Header header = response.getFirstHeader("Content-Encoding");
+        if (header != null
+                && header.getValue().toLowerCase().indexOf("gzip") > -1) {
+            inputStream = new GZIPInputStream(inputStream);
+        }
+
+        int readBytes = 0;
+        byte[] sBuffer = new byte[512];
+        while ((readBytes = inputStream.read(sBuffer)) != -1) {
+            content.write(sBuffer, 0, readBytes);
+        }
+        result = new String(content.toByteArray(), "UTF-8");
+        return result;
+    }*/
+
+    /**
+     * Parse a server response into a JSON Object. This is a basic
+     * implementation using org.json.JSONObject representation. More
+     * sophisticated applications may wish to do their own parsing. The parsed
+     * JSON is checked for a variety of error fields and a RuntimeException is
+     * thrown if an error condition is set, populated with the error message and
+     * error type or code if available.
+     *
+     * @param response - string representation of the response
+     * @return the response as a JSON Object
+     * @throws JSONException - if the response is not valid JSON
+     */
+    @SuppressWarnings("unused")
+    public static JSONObject parseJson(String response) throws JSONException {
+        // Edge case: when sending a POST request to /[post_id]/likes
+        // the return value is 'true' or 'false'. Unfortunately
+        // these values cause the JSONObject constructor to throw
+        // an exception.
+        if (response.equals("false")) {
+            // throw new TencentError("request failed");
+            response = "{value : false}";
+        }
+        if (response.equals("true")) {
+            response = "{value : true}";
+        }
+
+        // dallonshi: PICK json string from response.
+        if (response.contains("allback(")) {
+            response = response.replaceFirst(
+                    "[\\s\\S]*allback\\(([\\s\\S]*)\\);[^\\)]*\\z", "$1");
+            response = response.trim();
+        }
+
+        if (response.contains("online[0]=")) {
+        	response = "{online:"+response.charAt(response.length()-2)+"}";
+        }
+        JSONObject json = new JSONObject(response);
+
+        // errors set by the server are not consistent
+        // they depend on the method and endpoint
+
+        // dallonshi: no need to parse error from server in SDK. let the
+        // user
+        // application do the job.
+        if (false) {
+            if (json.has("error")) {
+                JSONObject error = json.getJSONObject("error");
+                throw new RuntimeException("message, type : "
+                        + error.getString("message") + ", "
+                        + error.getString("type"));
+            }
+            if (json.has("error_code") && json.has("error_msg")) {
+                throw new RuntimeException(json.getString("error_msg"));
+            }
+            if (json.has("error_code")) {
+                throw new RuntimeException("request failed, error_code: "
+                        + json.getString("error_code"));
+            }
+            if (json.has("error_msg")) {
+                throw new RuntimeException(json.getString("error_msg"));
+            }
+            if (json.has("error_reason")) {
+                throw new RuntimeException(json.getString("error_reason"));
+            }
+        }
+        return json;
+    }
+
+    /**
+     * Display a simple alert dialog with the given text and title.
+     *
+     * @param context Android context in which the dialog should be displayed
+     * @param title Alert dialog title
+     * @param text Alert dialog message
+     */
+    public static void showAlert(Context context, String title, String text) {
+        Builder alertBuilder = new Builder(context);
+        alertBuilder.setTitle(title);
+        alertBuilder.setMessage(text);
+        alertBuilder.create().show();
+    }
+
+    public static String getUserIp() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface
+                    .getNetworkInterfaces(); en != null && en.hasMoreElements();) {
+                NetworkInterface intf = en.nextElement();
+                for (Enumeration<InetAddress> enumIpAddr = intf
+                        .getInetAddresses(); enumIpAddr.hasMoreElements();) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress()) {
+                        return inetAddress.getHostAddress().toString();
+                    }
+                }
+            }
+        } catch (SocketException ex) {
+        	SLog.d(TAG, "getUserIp SocketException ",ex);
+        }
+        return "";
+    }
+
+    public static boolean isEmpty(String str) {
+        return str == null || str.length() == 0;
+    }
+
+    /**
+     * 判断是否装了4.3及4.3以上版本且不是4.4版本的QQ浏览器
+     * @param context
+     * @return
+     */
+    private static boolean isQQBrowerAvailable(Context context) {
+        PackageInfo pkg;
+        try {
+            pkg = context.getPackageManager().getPackageInfo("com.tencent.mtt",
+                    0|PackageManager.GET_SIGNATURES);
+            String versionName = pkg.versionName;
+            if (SystemUtils.compareVersion(versionName, "4.3") >= 0
+                    && !versionName.startsWith("4.4")) {
+                Signature[] signatures = pkg.signatures;
+                if (signatures != null) {
+                    java.security.MessageDigest alga;
+                    try {
+                        alga = java.security.MessageDigest.getInstance("MD5");
+                        alga.update(signatures[0].toByteArray());
+                        String sign = Util.toHexString(alga.digest());
+                        alga.reset();
+                        // 比较签名
+                        final String QQBROWSER_SIGN = "d8391a394d4a179e6fe7bdb8a301258b";
+                        if (sign.equals(QQBROWSER_SIGN)) {
+                            return true;
+                        }
+                    } catch (NoSuchAlgorithmException e) {
+                        // TODO Auto-generated catch block
+                        SLog.e(TAG, "isQQBrowerAvailable has exception: " + e.getMessage());
+                    }
+                }
+            }
+        } catch (NameNotFoundException e) {
+            return false;
+        }
+        return false;
+    }
+
+    /**
+     * 使用系统浏览器打开url，当没找到系统浏览器时，尝试使用Chrome，都不存在时则返回false
+     *
+     * @param context
+     * @param url
+     * @return 成功找到浏览器并打开, 就返回true, 否则返回false
+     */
+    public static boolean openBrowser(Context context, String url) {
+
+//    	long b_time = System.currentTimeMillis();
+    	String targetUrl = url;
+    	boolean hasInstallQQBrowser = false;
+        try {
+        	hasInstallQQBrowser = isQQBrowerAvailable(context);
+        	if (hasInstallQQBrowser) {
+            	loadUrlWithBrowser(context, "com.tencent.mtt",
+                        "com.tencent.mtt.MainActivity", targetUrl);
+        	} else {
+              loadUrlWithBrowser(context, "com.android.browser",
+              "com.android.browser.BrowserActivity", targetUrl);
+			}
+
+        } catch (Exception e) {
+
+        	if (hasInstallQQBrowser) {
+        		try {
+            		//安装了QQ浏览器但启动出错
+                		loadUrlWithBrowser(context, "com.android.browser",
+                	              "com.android.browser.BrowserActivity", targetUrl);
+    			} catch (Exception e2) {
+    				// TODO: handle exception
+    				try {
+    	                loadUrlWithBrowser(context, "com.google.android.browser",
+    	                        "com.android.browser.BrowserActivity", targetUrl);
+    	            } catch (Exception e1) {
+    	                try {
+    	                    loadUrlWithBrowser(context, "com.android.chrome",
+    	                            "com.google.android.apps.chrome.Main", targetUrl);
+    	                } catch (Exception e3) {
+    	                    return false;
+    	                }
+    	            }
+    			}
+        	} else {
+        		//没有安装QQ浏览器启动系统浏览器出错
+        		try {
+	                loadUrlWithBrowser(context, "com.google.android.browser",
+	                        "com.android.browser.BrowserActivity", targetUrl);
+	            } catch (Exception e1) {
+	                try {
+	                    loadUrlWithBrowser(context, "com.android.chrome",
+	                            "com.google.android.apps.chrome.Main", targetUrl);
+	                } catch (Exception e3) {
+	                    return false;
+	                }
+	            }
+        	}
+
+        }
+        return true;
+    }
+
+    private static void loadUrlWithBrowser(Context context,
+            String pkg, String activityName, String url) {
+
+        Intent i = new Intent();
+        i.setComponent(new ComponentName(pkg, activityName));
+        i.setAction(Intent.ACTION_VIEW);
+        i.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        // SLog.v(TAG, url);
+        i.setData(Uri.parse(url));
+
+        context.startActivity(i);
+
+    }
+
+
+    /**
+     *
+     * 唤起手Q定向分享，根据scheme唤起
+     * scheme: mqqapi://share
+
+    public static boolean openMobileQQ(Context context, String url) {
+
+        try {
+        	Uri uri = Uri.parse(url);
+        	Intent it = new Intent(Intent.ACTION_VIEW, uri);
+        	////context.startActivity(it);
+        	((Activity)context).startActivityForResult(it, 10000);
+        } catch (Exception e) {
+        	e.printStackTrace();
+           return false;
+        }
+        return true;
+    }
+    */
+
+    /**
+     * Encrypt source string with MD5 algorithm.
+     *
+     * @param source
+     * @return MD5加密后的字符串
+     */
+    public static String encrypt(String source) {
+        String result = source;
+        try {
+            MessageDigest digest = MessageDigest.getInstance("MD5");
+            digest.update(getBytesUTF8(source));
+            byte[] array = digest.digest();
+            if (array != null) {
+                StringBuilder builder = new StringBuilder();
+                for (byte b : array) {
+                    builder.append(hexDigit(b >>> 4));
+                    builder.append(hexDigit(b));
+                }
+                result = builder.toString();
+            }
+
+        } catch (NoSuchAlgorithmException e) {
+            SLog.e(TAG, "encrypt has exception: " + e.getMessage());
+        }
+        return result;
+    }
+
+    private static char hexDigit(int b) {
+        b = b & 0x0f;
+        char ch;
+        if (b < 0x0a) {
+            ch = (char) ('0' + b);
+        } else {
+            ch = (char) ('a' + (b - 0x0a));
+        }
+        return ch;
+    }
+
+    private static final String BERNOULLI_REPORT_URL = "http://cgi.qplus.com/report/report";
+
+    public static void reportBernoulli(final Context context, String reportId, long costTime,
+            String appId) {
+        final Bundle params = new Bundle();
+        params.putString("appid_for_getting_config", appId);
+        params.putString("strValue", appId);
+        params.putString("nValue", reportId);
+        params.putString("qver", Constants.SDK_VERSION);
+        if (costTime != 0) {
+            params.putLong("elt", costTime);
+        }
+        // 异步线程上报
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    HttpUtils.openUrl2(context, BERNOULLI_REPORT_URL, Constants.HTTP_GET, params);
+                } catch (Exception e) {
+                    SLog.e(TAG, "reportBernoulli has exception: " + e.getMessage());
+                }
+            }
+        }.start();
+    }
+
+    /**
+     * 判断是否有sd卡
+     * @return
+     */
+    public static boolean hasSDCard(){
+        File SDdir=null;
+        boolean sdCardExist=
+        			Environment.getExternalStorageState().equals(android.os.Environment.MEDIA_MOUNTED);
+        if(sdCardExist){
+                SDdir=Environment.getExternalStorageDirectory();
+        }
+        if(SDdir!=null){
+                return true;
+        }
+        else{
+                return false;
+        }
+    }
+
+    /**
+     * add by toddzhao 2013-04-22 根据传入的10进制数字，转化为对应的字符型数字，例如 16->"16",
+     * 0x16->22->"22",
+     *
+     * @param keyData
+     * @return
+     */
+    public static String toHexString(byte[] keyData) {
+        if (keyData == null) {
+            return null;
+        }
+        int expectedStringLen = keyData.length * 2;
+        StringBuilder sb = new StringBuilder(expectedStringLen);
+        for (int i = 0; i < keyData.length; i++) {
+            String hexStr = Integer.toString(keyData[i] & 0x00FF, 16);
+            if (hexStr.length() == 1) {
+                hexStr = "0" + hexStr;
+            }
+            sb.append(hexStr);
+        }
+        return sb.toString();
+    }
+
+    /*
+     * 16进制数字字符集
+     */
+    private static String hexString="0123456789ABCDEF";
+    /*
+     * 将字符串编码成16进制数字,适用于所有字符（包括中文）
+     */
+    public static String toHexString(String str)
+    {
+    	//根据默认编码获取字节数组
+        byte[] bytes = getBytesUTF8(str);
+        StringBuilder sb=new StringBuilder(bytes.length * 2);
+        //将字节数组中每个字节拆解成2位16进制整数
+        for(int i=0;i<bytes.length;i++)
+        {
+            sb.append(hexString.charAt((bytes[i]&0xf0)>>4));
+            sb.append(hexString.charAt((bytes[i]&0x0f)>>0));
+        }
+        return sb.toString();
+    }
+
+  //转换十六进制编码为字符串
+    public static String hexToString(String s)
+    {
+        if("0x".equals(s.substring(0, 2)))
+        {
+            s =s.substring(2);
+        }
+        byte[] baKeyword = new byte[s.length()/2];
+        for(int i = 0; i < baKeyword.length; i++)
+        {
+            try
+            {
+                baKeyword[i] = (byte)(0xff & Integer.parseInt(s.substring(i*2, i*2+2),16));
+            }
+            catch(Exception e)
+            {
+                SLog.e(TAG, "hexToString has exception: " + e.getMessage());
+            }
+        }
+
+        try
+        {
+            s = new String(baKeyword, "utf-8");//UTF-16le:Not
+        }
+        catch (Exception e1)
+        {
+            SLog.e(TAG, "hexToString has exception: " + e1.getMessage());
+        }
+        return s;
+    }
+
+    /**
+     * 获取APP版本号
+     *
+     * @param context 应用传入的context
+     * @return 应用的versionName，如果不存在返回空串
+     */
+    public static String getAppVersion(Context context) {
+        PackageManager pm = context.getPackageManager();
+        try {
+            PackageInfo pi = pm.getPackageInfo(context.getPackageName(), 0);
+            return pi.versionName;
+        } catch (NameNotFoundException e) {
+            SLog.e(TAG, "getAppVersion error" + e.getMessage());
+            return "";
+        }
+
+    }
+
+    /**
+     * 获取应用名称
+     * @param context
+     * @return
+     */
+    public static final String getApplicationLable(Context context) {
+        if (context != null) {
+            CharSequence text = context.getPackageManager().getApplicationLabel(context.getApplicationInfo());
+            if (text != null) {
+                return text.toString();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 检查url是否有效
+     * @param url
+     * @return
+     */
+    public static final boolean isValidUrl(String url) {
+    	if (url == null) {
+    		return false;
+    	}
+    	return url.startsWith("http://") || url.startsWith("https://");
+    }
+
+    /**
+     * 判断文件路径是否存在
+     * @param path
+     * @return
+     */
+    /*public static final boolean isValidPath(String path) {
+    	if (path == null) {
+    		return false;
+    	}
+    	File file = new File(path);
+    	if (file != null && file.exists()) {
+    		return true;
+    	} else {
+    		return false;
+    	}
+    }*/
+
+    public static boolean fileExists(String path){
+		if (path == null) {
+    		return false;
+    	}
+    	File file = new File(path);
+    	if (file != null && file.exists()) {
+    		return true;
+    	} else {
+    		return false;
+    	}
+	}
+
+    /**
+     * 按照指定字符集和自定的字节长度截取文本, 如果被截取, 就加这个后缀
+     * @param srcText
+     * @param maxBytes
+     * @param textEncoding
+     * @param suffix 如果被截取, 就加这个后缀
+     * @return
+     */
+    public static final String subString(String srcText, int maxBytes, String textEncoding, String suffix) {
+        if (TextUtils.isEmpty(srcText)) {
+            return "";
+        }
+        String encoding = "UTF-8"; // 默认是utf-8
+        if (!TextUtils.isEmpty(textEncoding)) {
+            encoding = textEncoding;
+        }
+        try {
+            if (srcText.getBytes(encoding).length <= maxBytes) {
+                // 给的文本很短, 无需截取
+                return srcText;
+            } else {
+                int curPos = 0;
+                for (int i = 0; i < srcText.length(); i++) {
+                    int curCharLength = srcText.substring(i, i + 1).getBytes(encoding).length;
+                    if (curPos + curCharLength > maxBytes) {
+                        srcText = srcText.substring(0, i);
+                        if (!TextUtils.isEmpty(suffix)) {
+                            srcText += suffix;
+                        }
+                        // 从中间被截取
+                        return srcText;
+                    }
+                    curPos += curCharLength;
+                }
+                return srcText;
+            }
+        } catch (Exception e) {
+            SLog.e(TAG, "Util.subString has exception: " + e.getMessage());
+        }
+        return srcText;
+    }
+
+	public static int parseIntValue(String string) {
+		return parseIntValue(string, 0);
+	}
+
+	public static int parseIntValue(String string, int defaultVal) {
+		try {
+			return Integer.parseInt(string);
+		} catch (Exception ex) {
+		}
+		return defaultVal;
+	}
+
+	public static boolean checkNetWork(Context context) {
+        ConnectivityManager connectivity = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connectivity == null) {
+            return true;
+        }
+        else {
+            NetworkInfo[] info = connectivity.getAllNetworkInfo();
+            if (info != null) {
+                for (int i = 0; i < info.length; i++) {
+                    if (info[i].isConnectedOrConnecting()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public static Bundle composeViaReportParams(String openId, String via, String reportType, String actType,
+            String appId, String result) {
+        return composeViaReportParams(openId, reportType, actType, via, appId, result, "", "", "", "", "", "");
+    }
+
+    public static Bundle composeViaReportParams(String openId, String reportType, String actType, String via,
+            String appId, String result, String type, String loginStatus, String needUserAuth, String toUin,
+            String call_source, String toType) {
+        Bundle bundle = new Bundle();
+        bundle.putString("openid", openId);
+        bundle.putString("report_type", reportType);
+        bundle.putString("act_type", actType);
+        bundle.putString("via", via);
+        bundle.putString("app_id", appId);
+        bundle.putString("result", result);
+        bundle.putString("type", type);
+        bundle.putString("login_status", loginStatus);
+        bundle.putString("need_user_auth", needUserAuth);
+        bundle.putString("to_uin", toUin);
+        bundle.putString("call_source", call_source);
+        bundle.putString("to_type", toType);
+
+        return bundle;
+    }
+
+    /**
+     * 登陆，分享监控数据
+     * 
+     * @param result
+     *            0:成功, 1:失败
+     * @param code
+     *            请求返回码
+     * @param tmcost
+     *            耗时
+     * @param rate
+     *            采样率（100 意为 1/100的采样）
+     * @param cmd
+     *            监控命令字
+     * @param uin
+     * @param appid
+     *            应用程序ID
+     * @param shareType
+     *            分享类型 1: 好友: friends 2: 群: group 3: 讨论组: discuss 4: 空间: qzone
+     * @param detail
+     *            详细信息
+     * @return
+     */
+    public static Bundle composeHaboCgiReportParams(String result, String code, String tmcost, String rate, String cmd,
+            String uin, String appid, String shareType, String detail) {
+        Bundle bundle = new Bundle();
+        // 业务数据
+        // 1: android sdk 2: ios sdk 3: winphone sdk 4: android 5: ios 6:
+        // winphone 7. 其他
+        bundle.putString("platform", "1");
+        bundle.putString("result", result);
+        bundle.putString("code", code);
+        bundle.putString("tmcost", tmcost);
+        bundle.putString("rate", rate);
+        bundle.putString("cmd", cmd);
+        bundle.putString("uin", uin);
+        bundle.putString("appid", appid);
+        bundle.putString("share_type", shareType);
+        bundle.putString("detail", detail);
+
+        // 常规数据
+        bundle.putString("os_ver", android.os.Build.VERSION.RELEASE);
+        bundle.putString("network", APNUtil.getApnName(Global.getContext()));
+        bundle.putString("apn", APNUtil.getApn(Global.getContext()));
+        bundle.putString("model_name", android.os.Build.MODEL);
+        bundle.putString("sdk_ver", Constants.SDK_VERSION);
+        bundle.putString("packagename", Global.getPackageName());
+        bundle.putString("app_ver", Util.getAppVersionName(Global.getContext(), Global.getPackageName()));
+
+        return bundle;
+    }
+
+    /**
+     * 获取当前经纬度信息，xxxx.xxxx*xxxx.xxxx
+     */
+    public static String getLocation(Context context) {
+        if (null == context) {
+            return "";
+        }
+        try {
+            LocationManager lm = (LocationManager) context.getSystemService(Context.LOCATION_SERVICE);
+            Criteria criteria = new Criteria();
+            criteria.setCostAllowed(false);
+            // 设置位置服务免费
+            criteria.setAccuracy(Criteria.ACCURACY_COARSE); // 设置水平位置精度
+            // getBestProvider 只有允许访问调用活动的位置供应商将被返回
+            String providerName = lm.getBestProvider(criteria, true);
+            if (providerName != null) {
+                Location locationInfo = lm.getLastKnownLocation(providerName);
+                if (null == locationInfo) {
+                    return "";
+                }
+                // 获取维度信息
+                double latitude = locationInfo.getLatitude();
+                // 获取经度信息
+                double longitude = locationInfo.getLongitude();
+                location = latitude + "*" + longitude;
+                return location;
+
+            }
+        } catch (Exception e) {
+            SLog.e(TAG, "getLocation>>>", e);
+        }
+        return "";
+    }
+
+    public static void getPackageInfo(Context context, String packageName) {
+        if (null == context) {
+            return;
+        }
+        try {
+            PackageInfo info = context.getPackageManager().getPackageInfo(packageName, 0);
+            mVersionName = info.versionName;
+            mAppVersionName = mVersionName.substring(0, mVersionName.lastIndexOf('.'));
+            mBuildNum = mVersionName.substring(mVersionName.lastIndexOf('.') + 1, mVersionName.length());
+            mVersionCode = info.versionCode;
+        } catch (NameNotFoundException e1) {
+            SLog.e(TAG, "getPackageInfo has exception: " + e1.getMessage());
+        } catch (Exception e) {
+            // TODO: handle exception
+            SLog.e(TAG, "getPackageInfo has exception: " + e.getMessage());
+        }
+    }
+
+    public static String getVersionName(Context context, String packageName) {
+        if (null == context) {
+            return "";
+        }
+        getPackageInfo(context, packageName);
+        return mVersionName;
+    }
+
+    public static String getAppVersionName(Context context, String packageName) {
+        if (null == context) {
+            return "";
+        }
+        getPackageInfo(context, packageName);
+        return mAppVersionName;
+    }
+
+    public static String getQUA3(Context context, String packageName) {
+        if (null == context) {
+            return "";
+        }
+        mQua3 = getAppVersionName(context, packageName);
+        return mQua3;
+    }
+
+    public static byte[] getBytesUTF8(String str) {
+    	try {
+			return str.getBytes("UTF-8");
+		} catch (UnsupportedEncodingException e) {
+			return null;
+		}
+    }
+
+    public static boolean isNumeric(String str) {
+        Pattern pattern = Pattern.compile("[0-9]*");
+        Matcher isNum = pattern.matcher(str);
+        if (!isNum.matches()) {
+            return false;
+        }
+        return true;
+    }
+    
+    public static boolean isTablet(Context context) {
+    	double size = 0;
+		try {
+
+			// Compute screen size
+
+			DisplayMetrics dm = context.getResources().getDisplayMetrics();
+
+			float screenWidth = dm.widthPixels / dm.xdpi;
+
+			float screenHeight = dm.heightPixels / dm.ydpi;
+
+			size = Math.sqrt(Math.pow(screenWidth, 2) +
+
+			Math.pow(screenHeight, 2));
+
+		} catch (Throwable t) {
+		}
+
+		
+		
+		/*boolean hasTelephoneService = true;
+		try {
+			TelephonyManager manager = (TelephonyManager) context
+					.getSystemService(Context.TELEPHONY_SERVICE);
+			if (manager.getPhoneType() == TelephonyManager.PHONE_TYPE_NONE) {
+				hasTelephoneService = false;
+			}
+		} catch (Exception e) {
+			e.printStackTrace();
+		}*/
+
+		//只有设备大于6.5寸且不能打电话才认为是平板
+		if(size > 6.5/* && !hasTelephoneService*/){
+			return true;
+		}
+    	return false;
+    }
+
+    //这个方法有个坑，目前调用这个方法传过来的最大版本为5.3.0，若后续版本更新要判断更大的版本方法中对HD QQ和TIM的判断需要做修改
+    public static boolean isQQVersionBelow(Context ctx, String version) {
+    	boolean below = true;
+        //添加对HD QQ的支持,HD QQ分支从手Q 5.5版本拉出（按照之前的逻辑重构）
+        if (isTablet(ctx) && SystemUtils.getAppVersionName(ctx, Constants.PACKAGE_QQ_PAD) != null) {
+            below = false;
+        }
+
+        //添加对TIM的支持，TIM基于从手Q6.5.5版本裁剪
+        if (below && SystemUtils.getAppVersionName(ctx, Constants.PACKAGE_TIM) != null) {
+            below = false;
+        }
+
+        //添加对QIM的支持
+        if (below && SystemUtils.getAppVersionName(ctx, Constants.PACKAGE_QIM) != null) {
+            below = false;
+        }
+
+        if (below) {
+            below = SystemUtils.compareQQVersion(ctx, version) < 0;
+        }
+        return below;
+    }
+
+
+    /**
+     * QZoneShare调用该方法
+     * @param ctx
+     * @param version
+     * @return
+     */
+    public static boolean isQQVersionBelowForQZoneShare(Context ctx, String version) {
+        boolean below = true;
+        //添加对HD QQ的支持,HD QQ分支从手Q 5.5版本拉出（按照之前的逻辑重构）
+        if (isTablet(ctx) && SystemUtils.getAppVersionName(ctx, Constants.PACKAGE_QQ_PAD) != null) {
+            below = false;
+        }
+
+        //添加对TIM的支持，TIM基于从手Q6.5.5版本裁剪
+        if (below && SystemUtils.getAppVersionName(ctx, Constants.PACKAGE_TIM) != null) {
+            below = false;
+        }
+
+//        // 不支持QIM
+//        if (below && SystemUtils.getAppVersionName(ctx, Constants.PACKAGE_QIM) != null) {
+//            below = false;
+//        }
+
+        if (below) {
+            below = SystemUtils.compareQQVersion(ctx, version) < 0;
+        }
+        return below;
+    }
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+    /// SDK接口能力版本判断
+    ///////////////////////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * 判断系统安装的手Q版本是否符合要求
+     * 只有4.1以上的手Q才支持定向分享
+     */
+    public static boolean isSupportShareToQQ(Context context, boolean selectQzoneDlg) {
+        //QQPad版本从QQ5.5拉出，支持定向分享
+        if (isTablet(context)) {
+            if (SystemUtils.getAppVersionName(context, Constants.PACKAGE_QQ_PAD) != null) {
+                return true;
+            }
+        }
+
+        //手Q4.1及以上，TIM所有版本 QIM所有版本 支持定向分享
+        if(!selectQzoneDlg) {
+            return SystemUtils.compareQQVersion(context, "4.1") >= 0 ||
+                    SystemUtils.getAppVersionName(context, Constants.PACKAGE_TIM) != null ||
+                    SystemUtils.getAppVersionName(context, Constants.PACKAGE_QIM) != null;
+        } else {
+            return SystemUtils.compareQQVersion(context, "4.1") >= 0 ||
+                    SystemUtils.getAppVersionName(context, Constants.PACKAGE_TIM) != null;
+
+        }
+
+    }
+
+
+    /**
+     * 只支持手Q5.9.5及其以上版本
+     * 新增TIM(基于手Q6.5.5)
+     */
+    public static boolean isSupportPushToQZone(Context context) {
+        return SystemUtils.compareQQVersion(context, SystemUtils.QQ_VERSION_NAME_5_9_5) >= 0 ||
+                SystemUtils.getAppVersionName(context, Constants.PACKAGE_TIM) != null;
+    }
+}

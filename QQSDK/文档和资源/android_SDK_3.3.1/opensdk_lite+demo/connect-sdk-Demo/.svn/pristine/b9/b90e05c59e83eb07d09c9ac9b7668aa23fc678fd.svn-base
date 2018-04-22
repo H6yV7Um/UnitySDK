@@ -1,0 +1,547 @@
+
+package com.tencent.open;
+
+import android.annotation.SuppressLint;
+import android.app.ProgressDialog;
+import android.content.Context;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
+import android.os.SystemClock;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.Window;
+import android.webkit.WebSettings;
+import android.webkit.WebSettings.RenderPriority;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
+import android.widget.FrameLayout;
+import android.widget.FrameLayout.LayoutParams;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.tencent.connect.auth.AuthConstants;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.Constants;
+import com.tencent.open.report.ReportManager;
+import com.tencent.open.log.SLog;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.Util;
+import com.tencent.open.widget.OpenWebView;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.lang.ref.WeakReference;
+
+public class TDialog extends JsDialog {
+
+    static final FrameLayout.LayoutParams FILL = new FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.FILL_PARENT,
+            ViewGroup.LayoutParams.FILL_PARENT);
+
+    static final String DISPLAY_STRING = "touch";
+
+    private static final String TAG = SLog.TAG + ".TDialog";
+
+    private static final int MSG_COMPLETE = 1;
+
+    private static final int MSG_CANCEL = 2;
+
+    private static final int MSG_SHOW_TIPS = 3;
+
+    private static final int MSG_ON_LOAD = 4;
+
+    private static final int MSG_SHOW_PROCESS = 5;
+
+    private WeakReference<Context> mWeakContext;
+
+    private static WeakReference<ProgressDialog> sWeakProcessDialog;
+
+    private String mUrl;
+
+    private OnTimeListener mListener;
+
+    private IUiListener listener;
+
+    private FrameLayout mFlMain;
+
+    private OpenWebView mWebView;
+
+    private FrameLayout mFlProcess;
+
+    private ProgressDialog mPdProcess;
+
+    private Handler mHandler;
+
+    private boolean isBrowserStarted = false;
+
+    private QQToken mToken=null;
+
+    private class THandler extends Handler {
+
+        private OnTimeListener mL;
+
+        public THandler(OnTimeListener l, Looper mainLooper) {
+            super(mainLooper);
+            mL = l;
+        }
+
+        @Override
+        public void handleMessage(Message msg) {
+        	SLog.d(TAG,"--handleMessage--msg.WHAT = "+msg.what);
+            switch (msg.what) {
+                case MSG_COMPLETE:
+                    mL.onComplete((String) msg.obj);
+                    break;
+
+                case MSG_CANCEL:
+                    mL.onCancel();
+                    break;
+
+                case MSG_SHOW_TIPS:
+                    // add by milesxia 2012-11-09
+                    // js网页调用此函数在终端上弹出tips
+                    if (mWeakContext != null && mWeakContext.get() != null) {
+                        showTips(mWeakContext.get(), (String) msg.obj);
+                    }
+                    break;
+
+                case MSG_ON_LOAD:
+                    break;
+                case MSG_SHOW_PROCESS:
+                    if (mWeakContext != null && mWeakContext.get() != null) {
+                        showProcessDialog(mWeakContext.get(), (String) msg.obj);
+                    }
+                    break;
+
+                default:
+                    break;
+            }
+        }
+    };
+
+    private static class OnTimeListener implements IUiListener {
+
+        private WeakReference<Context> mWeakCtx;
+        private String mAction;
+        String mUrl;
+        String mAppid;
+        private IUiListener mWeakL;
+
+        public OnTimeListener(Context ctx, String action, String url, String appid, IUiListener l) {
+            mWeakCtx = new WeakReference<Context>(ctx);
+            mAction = action;
+            mUrl = url;
+            mAppid = appid;
+            mWeakL = l;
+        }
+
+        private void onComplete(String result) {
+            try {
+                JSONObject obj = Util.parseJson(result);
+                onComplete(obj);
+            } catch (JSONException e) {
+                e.printStackTrace();
+                onError(new UiError(Constants.ERROR_JSON, Constants.MSG_JSON_ERROR, result));
+            }
+        }
+
+        @Override
+        public void onComplete(Object obj) {
+        	JSONObject response = (JSONObject)obj;
+            ReportManager.getInstance().reportCgi(mAction + "_H5", SystemClock.elapsedRealtime(), 0, 0,
+                    response.optInt("ret", -6), mUrl, false);
+            if (mWeakL != null) {
+                mWeakL.onComplete(response);
+                mWeakL = null;
+            }
+        }
+
+        @Override
+        public void onError(UiError e) {
+            String detail = e.errorMessage != null ? e.errorMessage + mUrl : mUrl;
+            ReportManager.getInstance().reportCgi(mAction + "_H5", SystemClock.elapsedRealtime(), 0, 0, e.errorCode,
+                    detail, false);
+            if (mWeakL != null) {
+                mWeakL.onError(e);
+                mWeakL = null;
+            }
+        }
+
+        @Override
+        public void onCancel() {
+            if (mWeakL != null) {
+                mWeakL.onCancel();
+                mWeakL = null;
+            }
+        }
+
+    }
+
+    public TDialog(Context context, String action, String url, final IUiListener listener, QQToken token) {
+        super(context, android.R.style.Theme_Translucent_NoTitleBar);
+        mWeakContext = new WeakReference<Context>(context);
+        mUrl = url;
+        mListener = new OnTimeListener(context, action, url, token.getAppId(), listener);
+        mHandler = new THandler(mListener, context.getMainLooper());
+        this.listener = listener;
+        mToken = token;
+    }
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+    	requestWindowFeature(Window.FEATURE_NO_TITLE);
+        super.onCreate(savedInstanceState);        
+
+        // setContentView(R.layout.com_tencent_open_dialog_layout);
+
+        createViews();
+        initViews();
+    }
+
+    @Override
+	public void onBackPressed() {
+    	if (mListener != null) {
+    		mListener.onCancel();
+    	}
+		super.onBackPressed();
+	}
+
+    private void createViews() {
+        TextView text = new TextView(mWeakContext.get());
+        text.setText("test");
+
+        LayoutParams flMainParams = new LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        mWebView = new OpenWebView(mWeakContext.get());
+        mWebView.setLayoutParams(flMainParams);
+
+        mFlMain = new FrameLayout(mWeakContext.get());
+        flMainParams.gravity = Gravity.CENTER;
+        mFlMain.setLayoutParams(flMainParams);
+        mFlMain.addView(mWebView);
+        setContentView(mFlMain);
+
+    }
+
+	@Override
+    protected void onConsoleMessage(String msg){
+		SLog.d(TAG,"--onConsoleMessage--");
+		try{
+		    jsBridge.canHandleUrl(mWebView,msg);
+		}catch(Exception e){
+
+		}
+	}
+
+//    @SuppressLint("NewApi")
+//    private final WebChromeClient mChromeClient = new WebChromeClient() {
+//        @Override
+//        public boolean onConsoleMessage(ConsoleMessage cm) {
+//            SLog.i("WebConsole", cm.message() + " -- From line "
+//                    + cm.lineNumber() + " of "
+//                    + cm.sourceId());
+//
+//			  if(Build.VERSION.SDK_INT > 7 ){
+//				  TDialog.this.onConsoleMessage((cm==null?"":cm.message()));
+//			  }
+//            return true;
+//        }
+//
+//        @Override
+//        public void onConsoleMessage (String message, int lineNumber, String sourceID){
+//            SLog.i("WebConsole", message + " -- From line "
+//                    + lineNumber + " of "
+//                    + sourceID);
+//			  if(Build.VERSION.SDK_INT == 7 ){
+//				  TDialog.this.onConsoleMessage(message);
+//			  }
+//        }
+//    };
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void initViews() {
+        // View v = findViewById(R.id.com_tencent_open_progress_fl);
+        // sWeakProcessBar = new WeakReference<View>(v);
+        // mWebView = (WebView) findViewById(R.id.com_tencent_open_dialog_wv);
+        mWebView.setVerticalScrollBarEnabled(false);
+        mWebView.setHorizontalScrollBarEnabled(false);
+        mWebView.setWebViewClient(new FbWebViewClient());
+        mWebView.setWebChromeClient(mChromeClient);
+        mWebView.clearFormData();
+        // mWebView.clearCache(true);
+
+        WebSettings setting = mWebView.getSettings();
+        if (setting == null) {
+            return;
+        }
+        setting.setSavePassword(false);
+        setting.setSaveFormData(false);
+        // setting.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
+        setting.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        // add by milesxia 2012-11-16
+        setting.setNeedInitialFocus(false);
+        setting.setBuiltInZoomControls(true);
+        setting.setSupportZoom(true);
+
+        setting.setRenderPriority(RenderPriority.HIGH);
+        setting.setJavaScriptEnabled(true);
+
+        if (mWeakContext != null && mWeakContext.get() != null) {
+            setting.setDatabaseEnabled(true);
+            setting.setDatabasePath(mWeakContext.get().getApplicationContext()
+                    .getDir("databases", Context.MODE_PRIVATE).getPath());
+        }
+        setting.setDomStorageEnabled(true);
+
+        jsBridge.registerHandler(new JsListener(), "sdk_js_if");
+
+        mWebView.loadUrl(mUrl);
+        mWebView.setLayoutParams(FILL);
+        mWebView.setVisibility(View.INVISIBLE);
+        mWebView.getSettings().setSavePassword(false);
+    }
+
+    public void callJs(String method, String data) {
+        String script = "javascript:" + method + "(" + data + ");void("+ System.currentTimeMillis() + ");";
+        mWebView.loadUrl(script);
+    }
+
+    private class JsListener  extends JsBridge.JsHandler {
+
+        @SuppressWarnings("unused")
+        // called by JS
+        public void onAddShare(final String json_result) {
+            SLog.d(TAG, "JsListener onAddShare");
+            onComplete(json_result);
+        }
+
+        @SuppressWarnings("unused")
+        // called by JS
+        public void onInvite(final String json_result) {
+            onComplete(json_result);
+        }
+
+        @SuppressWarnings("unused")
+        // called by JS
+        public void onCancelAddShare(final String flag) {
+            SLog.e(TAG, "JsListener onCancelAddShare" + flag);
+            onCancel("cancel");
+        }
+
+        @SuppressWarnings("unused")
+        // called by JS
+        public void onCancelLogin() {
+            onCancel("");
+        }
+
+        @SuppressWarnings("unused")
+        // called by JS
+        public void onCancelInvite() {
+            SLog.e(TAG, "JsListener onCancelInvite");
+            onCancel("");
+        }
+
+        public void onComplete(final String result) {
+            mHandler.obtainMessage(MSG_COMPLETE, result).sendToTarget();
+            SLog.e(TAG, "JsListener onComplete" + result);
+            dismiss();
+        }
+
+        public void onCancel(String msg) {
+            SLog.e(TAG, "JsListener onCancel --msg = " + msg);
+            mHandler.obtainMessage(MSG_CANCEL, msg).sendToTarget();
+            dismiss();
+        }
+
+        @SuppressWarnings("unused")
+        public void showMsg(String msg) {
+            mHandler.obtainMessage(MSG_SHOW_TIPS, msg).sendToTarget();
+        }
+
+        // @SuppressWarnings("unused")
+        // public void showProcess(String msg) {
+        // mHandler.obtainMessage(MSG_SHOW_PROCESS, msg).sendToTarget();
+        // }
+
+        @SuppressWarnings("unused")
+        public void onLoad(String msg) {
+            mHandler.obtainMessage(MSG_ON_LOAD, msg).sendToTarget();
+        }
+    }
+
+    private class FbWebViewClient extends WebViewClient {
+
+        @Override
+        public boolean shouldOverrideUrlLoading(WebView view, String url) {
+        	SLog.v(TAG, "Redirect URL: " + url);
+            if (url.startsWith(ServerSetting.getInstance().getEnvUrl(mWeakContext.get(),
+                    ServerSetting.DEFAULT_REDIRECT_URI))) {
+                mListener.onComplete(Util.parseUrlToJson(url));
+                if(TDialog.this.isShowing()) {
+                    dismiss();
+                }
+                return true;
+            } else if (url.startsWith(Constants.CANCEL_URI)) {
+                mListener.onCancel();
+                if(TDialog.this.isShowing()) {
+                    dismiss();
+                }
+                return true;
+            } else if (url.startsWith(Constants.CLOSE_URI)) {
+                // 关闭webview
+                if(TDialog.this.isShowing()) {
+                    dismiss();
+                }
+                return true;
+            } else if (url.startsWith(Constants.DOWNLOAD_URI) || url.endsWith(".apk")) {//支持.apk结尾的连接下载
+            	try{
+	                // 在浏览器中打开需要下载的url
+                    Uri uri;
+                    if(url.startsWith(Constants.DOWNLOAD_URI)){
+                         uri = Uri.parse(Uri.decode(url.substring(Constants.DOWNLOAD_URI.length())));
+                    }else {
+                         uri = Uri.parse(Uri.decode(url));
+                    }
+	                Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+	                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+	                if (mWeakContext != null && mWeakContext.get() != null) {
+	                    mWeakContext.get().startActivity(intent);
+	                }
+            	} catch (Exception e) {
+            		e.printStackTrace();
+            	}
+                return true;
+            } else if (url.startsWith(AuthConstants.PROGRESS_URI)) {
+            	return true;
+            }
+            return false;
+        }
+
+        @Override
+        public void onReceivedError(WebView view, int errorCode,
+                String description, String failingUrl) {
+            super.onReceivedError(view, errorCode, description, failingUrl);
+            mListener.onError(new UiError(errorCode, description, failingUrl));
+            // if (sWeakProcessDialog != null && sWeakProcessDialog.get() !=
+            // null) {
+            // sWeakProcessDialog.get().dismiss();
+            // }
+            if (mWeakContext != null && mWeakContext.get() != null) {
+                Toast.makeText(mWeakContext.get(), "网络连接异常或系统错误",
+                        Toast.LENGTH_SHORT).show();
+            }
+            dismiss();
+        }
+
+        @Override
+        public void onPageStarted(WebView view, String url, Bitmap favicon) {
+        	SLog.v(TAG, "Webview loading URL: " + url);
+            super.onPageStarted(view, url, favicon);
+            // sProgress.setVisibility(View.VISIBLE);
+        }
+
+        @Override
+        public void onPageFinished(WebView view, String url) {
+            super.onPageFinished(view, url);
+            // sProgress.setVisibility(View.GONE);
+            mWebView.setVisibility(View.VISIBLE);
+        }
+
+        // FIXME SslError will occur when using fiddler and customized
+        // hosts. remove this when release.
+        /*@TargetApi(8)
+        @Override
+        public void onReceivedSslError(WebView view, SslErrorHandler handler,
+                SslError error) {
+            handler.proceed();
+        }*/
+
+    }
+
+    static Toast sToast = null;
+
+    private static void showTips(Context context, String response) {
+        try {
+            // tips时间控制，0短1长
+            JSONObject tips = Util.parseJson(response);
+            int type = tips.getInt("type");
+            // 弹出的tips内容
+            String tipsMsg = tips.getString("msg");
+
+            if (type == Toast.LENGTH_SHORT) {
+                if (sToast == null) {
+                    sToast = Toast.makeText(context, tipsMsg,
+                            Toast.LENGTH_SHORT);
+                } else {
+                    sToast.setView(sToast.getView());
+                    sToast.setText(tipsMsg);
+                    sToast.setDuration(Toast.LENGTH_SHORT);
+                }
+                sToast.show();
+            } else if (type == Toast.LENGTH_LONG) {
+                if (sToast == null) {
+                    sToast = Toast
+                            .makeText(context, tipsMsg, Toast.LENGTH_LONG);
+                } else {
+                    sToast.setView(sToast.getView());
+                    sToast.setText(tipsMsg);
+                    sToast.setDuration(Toast.LENGTH_LONG);
+                }
+                sToast.show();
+            }
+        } catch (JSONException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
+
+    private static void showProcessDialog(Context context, String response) {
+        try {
+            if (context == null || response == null) {
+                return;
+            }
+            JSONObject tips = Util.parseJson(response);
+            int needShow = tips.getInt("action");
+            String processMsg = tips.getString("msg");
+            if (needShow == 1) {
+                if (sWeakProcessDialog == null || sWeakProcessDialog.get() == null) {
+                    ProgressDialog pdProcess = new ProgressDialog(context);
+                    pdProcess.setMessage(processMsg);
+                    sWeakProcessDialog = new WeakReference<ProgressDialog>(
+                            pdProcess);
+                    pdProcess.show();
+                } else {
+                    sWeakProcessDialog.get().setMessage(processMsg);
+                    if (!sWeakProcessDialog.get().isShowing()) {
+                        sWeakProcessDialog.get().show();
+                    }
+                }
+            } else if (needShow == 0) {
+                if (sWeakProcessDialog == null) {
+                    return;
+                } else {
+                    if (sWeakProcessDialog.get() != null
+                            && sWeakProcessDialog.get().isShowing()) {
+                        sWeakProcessDialog.get().dismiss();
+                        sWeakProcessDialog = null;
+                    }
+                }
+            }
+        } catch (JSONException e) {
+            // TODO Auto-generated catch block
+            e.printStackTrace();
+        }
+    }
+
+}

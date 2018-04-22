@@ -1,0 +1,61 @@
+package com.tencent.open;
+
+import com.tencent.open.log.SLog;
+
+import android.annotation.SuppressLint;
+import android.app.Dialog;
+import android.content.Context;
+import android.os.Build;
+import android.os.Bundle;
+import android.webkit.ConsoleMessage;
+import android.webkit.WebChromeClient;
+
+public abstract class JsDialog extends Dialog {
+
+    private static final String TAG = SLog.TAG + ".JsDialog";
+    
+	protected JsBridge jsBridge;
+	public JsDialog(Context context) {
+		super(context);
+	}
+
+	public JsDialog(Context context, int themeTranslucentNotitlebar) {
+		super(context,themeTranslucentNotitlebar);
+	}
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		super.onCreate(savedInstanceState);
+		jsBridge = new JsBridge();
+	}
+
+	protected abstract void onConsoleMessage(String msg);
+
+    @SuppressLint("NewApi")
+    protected final WebChromeClient mChromeClient = new WebChromeClient() {
+        @Override
+        public boolean onConsoleMessage(ConsoleMessage cm) {
+        	if (cm == null) {
+        		return false;
+        	}
+            SLog.i(TAG, "WebChromeClient onConsoleMessage" + cm.message() + " -- From  111 line "
+                    + cm.lineNumber() + " of "
+                    + cm.sourceId());
+
+			  if(Build.VERSION.SDK_INT > 7 ){
+				  JsDialog.this.onConsoleMessage((cm==null?"":cm.message()));
+			  }
+            return true;
+        }
+
+        @Override
+        public void onConsoleMessage (String message, int lineNumber, String sourceID){
+            SLog.i(TAG, "WebChromeClient onConsoleMessage" + message + " -- From 222 line "
+                    + lineNumber + " of "
+                    + sourceID);
+			  if(Build.VERSION.SDK_INT == 7){
+				  JsDialog.this.onConsoleMessage(message);
+			  }
+        }
+    };
+}

@@ -1,0 +1,327 @@
+package com.tencent.open;
+
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.SocketTimeoutException;
+
+import org.apache.http.conn.ConnectTimeoutException;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.app.Activity;
+import android.content.Context;
+import android.location.Location;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Message;
+import android.os.SystemClock;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.tauth.IRequestListener;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.open.utils.HttpUtils.HttpStatusException;
+import com.tencent.open.utils.HttpUtils.NetworkUnavailableException;
+
+public class LocationApi extends BaseApi implements LbsAgent.OnGetLocationListener {
+	private static final String TAG = SLog.TAG + ".LocationApi";
+	private static final String CGI_SEARCH_NEARBY = "http://fusion.qq.com/cgi-bin/qzapps/mapp_lbs_getnear.cgi";
+	private static final String CGI_DELETE_LOCATION = "http://fusion.qq.com/cgi-bin/qzapps/mapp_lbs_delete.cgi";
+	
+	private static final int MSG_GET_LOCATION_TIMEOUT = 101;
+	private static final int MSG_VERIFY_SOSOCODE_SUCCESS = 103;
+	private static final int MSG_VERIFY_SOSOCODE_FAILED = 104;
+	
+	private static final String ACTION_SEARCH = "search_nearby";
+	private static final String ACTION_DELETE = "delete_location";
+	
+	private static final String EVENT_ID_SEARCH = "id_search_nearby";
+	private static final String EVENT_ID_DELETE = "id_delete_location";
+	
+	private static final int PAGE_DEFAULT = 1;
+	
+	private HandlerThread mHandlerThread;
+	private Handler mHandler;
+	private Handler mMainHandler;
+	private LbsAgent mLbsAgent;
+	
+	private Bundle mParams;
+	private IUiListener mSearchListener;
+	
+	public LocationApi(QQToken token) {
+		super(token);
+		init();
+	}
+
+	public LocationApi(QQAuth qqAuth, QQToken token) {
+		super(qqAuth, token);
+		init();
+	}
+	
+	private void init() {
+		mLbsAgent = new LbsAgent();
+		mHandlerThread = new HandlerThread("get_location");
+		mHandlerThread.start();
+		mHandler = new Handler(mHandlerThread.getLooper());
+		mMainHandler = new Handler(Global.getContext().getMainLooper()) {
+			@Override
+			public void handleMessage(Message msg) {
+				switch (msg.what) {
+				case MSG_VERIFY_SOSOCODE_SUCCESS:
+					SLog.d(TAG, "location: verify sosocode success.");
+					mLbsAgent.requestLocationUpdate(Global.getContext(), LocationApi.this);
+					mMainHandler.sendEmptyMessageDelayed(MSG_GET_LOCATION_TIMEOUT, 10000);
+					break;
+				case MSG_VERIFY_SOSOCODE_FAILED:
+					SLog.d(TAG, "location: verify sosocode failed.");
+					locationFailed(Constants.ERROR_LOCATION_VERIFY_FAILED, Constants.MSG_LOCATION_VERIFY_ERROR);
+					break;
+				case MSG_GET_LOCATION_TIMEOUT:
+					SLog.d(TAG, "location: get location timeout.");
+					locationFailed(Constants.ERROR_LOCATION_TIMEOUT, Constants.MSG_LOCATION_TIMEOUT_ERROR);
+					break;
+				default:
+					break;
+				}
+				super.handleMessage(msg);
+			}
+		};
+	}
+	
+	public void searchNearby(final Activity activity, final Bundle params,
+			final IUiListener listener) {
+		if (!checkNetworkAvailable()) {
+			if (listener != null) {
+				listener.onComplete(unavailableNetworkJson());
+			}
+			return;
+		}
+		mParams = params;
+		mSearchListener = listener;
+		mHandler.post(new Runnable() {
+			
+			@Override
+			public void run() {
+				if (mLbsAgent.verifyRegCode()) {
+					Message.obtain(mMainHandler, MSG_VERIFY_SOSOCODE_SUCCESS).sendToTarget();
+				} else {
+					Message.obtain(mMainHandler, MSG_VERIFY_SOSOCODE_FAILED).sendToTarget();
+				}
+			}
+		});
+	}
+	
+	public void deleteLocation(Activity activity, Bundle params, IUiListener listener) {
+		if (!checkNetworkAvailable()) {
+			if (listener != null) {
+				listener.onComplete(unavailableNetworkJson());
+			}
+			return;
+		}
+		Bundle p = null;
+		if (params != null) {
+			p = new Bundle(params);
+			p.putAll(composeCGIParams());
+		} else {
+			p = composeCGIParams();
+		}
+		
+		p.putString("appid", mToken.getAppId());
+		p.putString("timestamp", String.valueOf(System.currentTimeMillis()));//时间戳
+		String g_skey = "tencent&sdk&qazxc***14969%%";
+		String version = "qzone3.4";
+		//后台需要encrytoken作为登录态校验
+		String encrytoken = Util.encrypt(g_skey + mToken.getAccessToken() + mToken.getAppId()
+				+ mToken.getOpenId() + version);
+		p.putString("encrytoken", encrytoken);
+		SLog.v(TAG, "location: delete params: " + p);
+
+		TaskRequestListener requestListener = new TaskRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), CGI_DELETE_LOCATION, p,
+				Constants.HTTP_GET, requestListener);
+		
+		report(ACTION_DELETE, "success");
+    }
+	
+	private void doSearchNearby(Location location) {
+		Bundle p = null;
+		SLog.v(TAG, "doSearchNearby location: search mParams: " + mParams);
+		if (mParams != null) {
+			p = new Bundle(mParams);
+			p.putAll(composeCGIParams());
+		} else {
+			p = composeCGIParams();
+		}
+
+		String latitude = String.valueOf(location.getLatitude());
+		String longitude = String.valueOf(location.getLongitude());
+		p.putString("appid", mToken.getAppId());
+		if (!p.containsKey("latitude")) {
+			p.putString("latitude", latitude);// 纬度
+		}
+		if (!p.containsKey("longitude")) {
+			p.putString("longitude", longitude);// 经度
+		}
+		//p.putString("timestamp", String.valueOf(System.currentTimeMillis()));// 时间戳
+		if (!p.containsKey("page")) {
+			// 默认page=1，返回前100条数据，也可由开放商设置page页
+			p.putString("page", String.valueOf(PAGE_DEFAULT));
+		}
+		String g_skey = "tencent&sdk&qazxc***14969%%";
+		String version = "qzone3.4";
+		//后台需要encrytoken作为登录态校验
+		String encrytoken = Util.encrypt(g_skey + mToken.getAccessToken() + mToken.getAppId()
+				+ mToken.getOpenId() + version);
+		p.putString("encrytoken", encrytoken);
+		SLog.v(TAG, "location: search params: " + p);
+
+		SLog.d(TAG, "GetNearbySwitchStart:" + SystemClock.elapsedRealtime());
+		TaskRequestListener requestListener = new TaskRequestListener(mSearchListener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), CGI_SEARCH_NEARBY, p,
+				Constants.HTTP_GET, requestListener);
+	}
+	
+	private void locationFailed(int ret, String errmsg) {
+		mLbsAgent.removeUpdate();
+		if (mSearchListener == null) return;
+		
+		JSONObject obj = new JSONObject();
+		try {
+			obj.put("ret", ret);
+			obj.put("errMsg", errmsg);
+		} catch (JSONException e) {
+			e.printStackTrace();
+		}
+		
+		mSearchListener.onComplete(obj);
+	}
+	
+	private void locationSuccess() {
+		mLbsAgent.removeUpdate();
+	}
+	
+	private boolean checkNetworkAvailable() {
+		ConnectivityManager cnMgr = (ConnectivityManager) Global.getContext()
+				.getSystemService(Context.CONNECTIVITY_SERVICE);
+		if (cnMgr != null) {
+			NetworkInfo info = cnMgr.getActiveNetworkInfo();
+			if (info == null || !info.isAvailable()) {
+				return false;
+			}
+			
+			return true;
+		}
+		return false;
+	}
+	
+	private JSONObject unavailableNetworkJson() {
+		JSONObject obj = new JSONObject();
+		try {
+			obj.put("ret", Constants.ERROR_HTTPSTATUS_ERROR);
+			obj.put("errMsg", Constants.MSG_IO_ERROR);
+		} catch (JSONException e) {
+			e.printStackTrace();
+		}
+		
+		return obj;
+	}
+	
+	private void report(final String action, final String... args) {
+		mHandler.post(new Runnable() {
+			
+			@Override
+			public void run() {
+				if (args == null || args.length == 0) return;
+				
+				String eventId = ACTION_SEARCH.equals(action) ? EVENT_ID_SEARCH : EVENT_ID_DELETE;
+				TencentStat.trackCustomEvent(Global.getContext(), mToken, eventId, args);
+			}
+		});
+	}
+    
+    @Override
+	public void onLocationUpdate(Location location) {
+    	doSearchNearby(location);
+    	locationSuccess();
+    	mMainHandler.removeMessages(MSG_GET_LOCATION_TIMEOUT);
+	}
+	
+	private class TaskRequestListener extends BaseRequestListener {
+		private IUiListener lis;
+		public TaskRequestListener(IUiListener listener) {
+			lis = listener;
+		}
+
+		@Override
+		public void onComplete(JSONObject response) {
+			if (lis != null) {
+				lis.onComplete(response);
+			}
+			SLog.d(TAG, "TaskRequestListener onComplete GetNearbySwitchEnd:" + SystemClock.elapsedRealtime());
+		}
+
+		protected void handleException(Exception e) {
+			if (lis != null) {
+				lis.onError(new UiError(100, e.getMessage(), null));
+			}
+		}
+
+	}
+
+	private abstract class BaseRequestListener implements IRequestListener {
+		protected abstract void handleException(Exception e);
+
+		@Override
+		public void onIOException(IOException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onMalformedURLException(MalformedURLException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onJSONException(JSONException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onConnectTimeoutException(ConnectTimeoutException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onSocketTimeoutException(SocketTimeoutException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onNetworkUnavailableException(NetworkUnavailableException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onHttpStatusException(HttpStatusException e) {
+			handleException(e);
+		}
+
+		@Override
+		public void onUnknowException(Exception e) {
+			handleException(e);
+		}
+
+	}
+
+}

@@ -1,0 +1,63 @@
+package com.tencent.connect.auth;
+
+public class QQToken {
+	public static final int AUTH_WEB 	= 1; 		// auth from browser or webview
+	public static final int AUTH_QQ 		= 2;		// auth from qq
+	public static final int AUTH_QZONE	= 3;		// auth from qzone
+	
+    private String mAppId;
+	private String mAccessToken;
+    private String mOpenId;
+    private int mAuthSource = AUTH_WEB;
+    private long mExpireTime = -1L;
+    
+    public QQToken(String appId) {
+    	mAppId = appId;
+    }
+    
+    public boolean isSessionValid() {
+        return mAccessToken != null && System.currentTimeMillis() < mExpireTime;
+    }
+    
+    public String getAppId() {
+		return mAppId;
+	}
+
+	public void setAppId(String appId) {
+		mAppId = appId;
+	}
+
+	public String getAccessToken() {
+		return mAccessToken;
+	}
+
+	public void setAccessToken(String accessToken, String validTimeInSecond)
+			throws NumberFormatException {
+		mAccessToken = accessToken;
+		mExpireTime = 0L;
+		if (validTimeInSecond != null) {
+			mExpireTime = System.currentTimeMillis() + Long.parseLong(validTimeInSecond)
+		                * 1000;
+		}
+	}
+
+	public String getOpenId() {
+		return mOpenId;
+	}
+
+	public void setOpenId(String openId) {
+		mOpenId = openId;
+	}
+
+	public int getAuthSource() {
+		return mAuthSource;
+	}
+
+	public void setAuthSource(int authSource) {
+		mAuthSource = authSource;
+	}
+
+	public long getExpireTimeInSecond() {
+		return mExpireTime;
+	}
+}

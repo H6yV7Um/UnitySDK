@@ -1,0 +1,459 @@
+package com.tencent.connect.share;
+
+import java.io.File;
+import java.security.PublicKey;
+import java.util.ArrayList;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.SystemClock;
+import android.text.TextUtils;
+import android.util.Base64;
+
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.TDialog;
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.AsynLoadImg;
+import com.tencent.open.utils.AsynLoadImgBack;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.Util;
+
+public class QQShare extends BaseApi {
+    private static final String TAG = SLog.TAG + ".QQShare";
+	private static final String SHAREQQ_SCHEME_URL = "mqqapi://share/to_fri?src_type=app&version=1&file_type=news";
+	private static final String SHAREQQ_H5_URL = "http://openmobile.qq.com/api/check?page=shareindex.html&style=9";
+
+    // zivon: 定向分享title和summary的最大长度限制(字节长度), 超过这个数字会被截取
+    public static final int QQ_SHARE_TITLE_MAX_LENGTH = 128;
+    public static final int QQ_SHARE_SUMMARY_MAX_LENGTH = 512;
+
+    public static final String SHARE_TO_QQ_IMAGE_URL = "imageUrl";
+    public static final String SHARE_TO_QQ_IMAGE_LOCAL_URL = "imageLocalUrl";
+    public static final String SHARE_TO_QQ_TITLE = "title";
+    public static final String SHARE_TO_QQ_SUMMARY = "summary";
+    public static final String SHARE_TO_QQ_SITE = "site";
+    public static final String SHARE_TO_QQ_TARGET_URL = "targetUrl";
+    public static final String SHARE_TO_QQ_APP_NAME = "appName";
+    public static final String SHARE_TO_QQ_AUDIO_URL = "audio_url"; //音乐分享播放url
+
+    public static final String SHARE_TO_QQ_KEY_TYPE = "req_type";
+
+    // 增加扩展字段，后续新加字段可考虑复用此字段
+    public static final String SHARE_TO_QQ_EXT_STR = "share_qq_ext_str";
+    public static final String SHARE_TO_QQ_EXT_INT = "cflag";
+
+    // zivon: 扩展flag
+    public static final int SHARE_TO_QQ_FLAG_QZONE_AUTO_OPEN = 1; // 自动打开qzone
+    public static final int SHARE_TO_QQ_FLAG_QZONE_ITEM_HIDE = 1 << 1; // 隐藏qzone
+
+    public static final int SHARE_TO_QQ_TYPE_DEFAULT = 1;
+    public static final int SHARE_TO_QQ_TYPE_AUDIO = 2;
+    protected static final int SHARE_TO_QQ_TYPE_HYPERTEXT = 3; // 这个暂时不对外开放
+    protected static final int SHARE_TO_QQ_TYPE_VIDEO = 4; // 这个暂时不对外开放, 暂不支持视频分享
+    public static final int SHARE_TO_QQ_TYPE_IMAGE = 5; // 图片分享   by august
+    public static final int SHARE_TO_QQ_TYPE_APP = 6;  //应用分享
+
+    public static final String SHARE_TO_QQ_ARK_INFO = "share_to_qq_ark_info";
+    // SDK上报share QQ type字段
+    public String mViaShareQQType = "";
+
+	public QQShare(Context context, QQToken token) {
+		super(token);
+	}
+
+	public void shareToQQ(Activity activity, Bundle params, IUiListener listener) {
+        SLog.i(TAG, "shareToQQ() -- start.");
+	    String imageUrl = params.getString(SHARE_TO_QQ_IMAGE_URL);
+        String title = params.getString(SHARE_TO_QQ_TITLE);
+        String summary = params.getString(SHARE_TO_QQ_SUMMARY);
+        String targetUrl = params.getString(SHARE_TO_QQ_TARGET_URL);
+        String localImageUrl = params.getString(SHARE_TO_QQ_IMAGE_LOCAL_URL);
+        int type = params.getInt(SHARE_TO_QQ_KEY_TYPE, SHARE_TO_QQ_TYPE_DEFAULT);
+        SLog.i(TAG, "shareToQQ -- type: " + type);
+		switch (type) {
+		case SHARE_TO_QQ_TYPE_DEFAULT:
+			mViaShareQQType = Constants.VIA_SHARE_TYPE_IMAGE_TEXT;
+			break;
+		case SHARE_TO_QQ_TYPE_AUDIO:
+			mViaShareQQType = Constants.VIA_SHARE_TYPE_MUSIC;
+			break;
+		case SHARE_TO_QQ_TYPE_IMAGE:
+			mViaShareQQType = Constants.VIA_SHARE_TYPE_IMAGE;
+			break;
+		case SHARE_TO_QQ_TYPE_APP:
+			mViaShareQQType = Constants.VIA_SHARE_TYPE_APP;
+		default:
+			break;
+		}
+        if (type == SHARE_TO_QQ_TYPE_APP) {
+        	//应用分享只支持5.0及其以上版本
+        	if (Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_5_0_0)) {
+        		listener.onError(new UiError(Constants.ERROR_QQVERSION_LOW, Constants.MSG_PARAM_APPSHARE_TOO_LOW, null));
+                SLog.e(TAG, "shareToQQ, app share is not support below qq5.0.");
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        "shareToQQ, app share is not support below qq5.0.");
+                return;
+        	}
+            targetUrl = String.format(ServerSetting.APP_DETAIL_PAGE, mToken.getAppId(), "mqq");
+            params.putString(SHARE_TO_QQ_TARGET_URL, targetUrl);
+        }
+        // 添加扩展标志位
+        // int extFlags = params.getInt(SHARE_TO_QQ_EXT_INT,0);
+        // String extStr = params.getString(SHARE_TO_QQ_EXT_STR);
+
+        // sd卡为空，不允许分享，发图片需要sd卡支持
+        if (!Util.hasSDCard()) {
+			if (Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_4_5_0)) {
+				listener.onError(new UiError(Constants.ERROR_UNKNOWN, Constants.MSG_SHARE_NOSD_ERROR, null));
+                SLog.e(TAG, "shareToQQ sdcard is null--end");
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        "shareToQQ sdcard is null");
+				return;
+			}
+        }
+
+        // 扩展字段可以用，只是在旧版本不做处理   by august
+        if (type == SHARE_TO_QQ_TYPE_IMAGE) {
+            if (Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_4_3_0)) {
+                listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_PARAM_QQ_VERSION_ERROR, null));
+                SLog.e(TAG, "shareToQQ, version below 4.3 is not support.");
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        "shareToQQ, version below 4.3 is not support.");
+                return;
+            }
+
+            if (!Util.fileExists(localImageUrl)) {
+            	listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_PARAM_IMAGE_URL_FORMAT_ERROR, null));
+                SLog.e(TAG, "shareToQQ -- error: " + Constants.MSG_PARAM_IMAGE_URL_FORMAT_ERROR);
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        Constants.MSG_PARAM_IMAGE_URL_FORMAT_ERROR);
+                return;
+            }
+        }
+
+        if (type != SHARE_TO_QQ_TYPE_IMAGE) {
+            // 除纯图分享外, 其他类型要检测targetUrl和title, 不能为空
+            if (TextUtils.isEmpty(targetUrl) || !(targetUrl.startsWith("http://") || targetUrl.startsWith("https://"))) {
+                listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_PARAM_ERROR, null));
+                SLog.e(TAG, "shareToQQ, targetUrl is empty or illegal..");
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        "shareToQQ, targetUrl is empty or illegal..");
+                return;
+            }
+            if (TextUtils.isEmpty(title)) {
+                listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_PARAM_TITLE_NULL_ERROR, null));
+                SLog.e(TAG, "shareToQQ, title is empty.");
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        "shareToQQ, title is empty.");
+                return;
+            }
+        }
+
+        // 判断imageUrl是否是合法的url或者本地path
+        if (!TextUtils.isEmpty(imageUrl) && !(imageUrl.startsWith("http://") || imageUrl.startsWith("https://"))) {
+            // imageUrl不为空, 并且imageUrl不是网络地址
+            File file = new File(imageUrl);
+            if (!file.exists()) {
+                // 文件不存在, 表示不是合法的本地路径
+                listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_PARAM_IMAGE_URL_FORMAT_ERROR, null));
+                SLog.e(TAG, "shareToQQ, image url is emprty or illegal.");
+                OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                        mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                        "shareToQQ, image url is emprty or illegal.");
+                return;
+            }
+        }
+
+        if (!TextUtils.isEmpty(title) && title.length() > QQ_SHARE_TITLE_MAX_LENGTH) {
+            // 定向分享支持title最长为QQ_SHARE_TITLE_MAX_LENGTH个字符
+        	title = Util.subString(title, QQ_SHARE_TITLE_MAX_LENGTH, null, null);
+            params.putString(SHARE_TO_QQ_TITLE, title);
+        }
+        if (!TextUtils.isEmpty(summary) && summary.length() > QQ_SHARE_SUMMARY_MAX_LENGTH) {
+            // 定向分享支持summary最长为QQ_SHARE_SUMMARY_MAX_LENGTH个字符
+        	summary =  Util.subString(summary, QQ_SHARE_SUMMARY_MAX_LENGTH, null, null);
+            params.putString(SHARE_TO_QQ_SUMMARY, summary);
+        }
+
+        int extFlags = params.getInt(SHARE_TO_QQ_EXT_INT,0);/*QIM不支持：选择了QZoneDialog的定向分享*/
+        if (Util.isSupportShareToQQ(activity, extFlags==1? true:false)) {
+        	SLog.i(TAG, "shareToQQ, support share");
+            shareToMobileQQ(activity, params, listener);
+        } else {
+        	try {
+        		SLog.w(TAG, "shareToQQ, don't support share, will show download dialog");
+        		// 下载手Q最新版本
+                new TDialog(activity, "", getCommonDownloadQQUrl(""), null, mToken).show();
+        	} catch(RuntimeException e) {
+        		SLog.e(TAG, " shareToQQ, TDialog.show not in main thread",e);
+        		e.printStackTrace();
+        		listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_NOT_CALL_ON_MAIN_THREAD, null));
+        	}
+            
+        }
+        SLog.i(TAG, "shareToQQ() -- end.");
+	}
+
+	/**
+     * 分享QQ好友：手Q客户端 和h5的差别：这里运行传递本地图片：字节流
+     */
+    private void shareToMobileQQ(final Activity activity, final Bundle params, final IUiListener listener) {
+        SLog.i(TAG, "shareToMobileQQ() -- start.");
+        String imageUrl = params.getString(SHARE_TO_QQ_IMAGE_URL);
+        final String title = params.getString(SHARE_TO_QQ_TITLE);
+        final String summary = params.getString(SHARE_TO_QQ_SUMMARY);
+        SLog.v(TAG, "shareToMobileQQ -- imageUrl: " + imageUrl);
+
+     // 先判断是否网络图片，如果是网络图片先下载,先保证有sd卡
+        if (!TextUtils.isEmpty(imageUrl)) {
+            if (Util.isValidUrl(imageUrl)) {
+                // 如果只发送网络图片，同时没有sd则放弃
+                if (TextUtils.isEmpty(title) && TextUtils.isEmpty(summary)/* && !Util.hasSDCard()*/) {
+                    if (listener != null) {
+                        listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                                Constants.MSG_SHARE_NOSD_ERROR, null));
+                        SLog.e(TAG, Constants.MSG_SHARE_NOSD_ERROR);
+                    }
+                    OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN,
+                            mToken.getAppId(), String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1,
+                            Constants.MSG_SHARE_NOSD_ERROR);
+                    return;
+                }
+                if (!Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_4_3_0)) {
+                    // 4.3以上的版本, 由于不需要拼图, 所以可以不下载图片, 直接分享
+                    doShareToQQ(activity, params, listener);
+                } else {
+                    // 根据网址的md5判断本地图片是否存在
+                    AsynLoadImg asynLoader = new AsynLoadImg(activity);
+                    asynLoader.save(imageUrl, new AsynLoadImgBack() {
+                        @Override
+                        public void saved(int code, String realName) {
+                            if (code == 0) {
+                                params.putString(SHARE_TO_QQ_IMAGE_LOCAL_URL, realName); // 替换图片地址为本地图片
+                            } else {
+                                if (TextUtils.isEmpty(title) && TextUtils.isEmpty(summary)) {
+                                    if (listener != null) {
+                                        listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                                                Constants.MSG_SHARE_GETIMG_ERROR, null));
+                                        SLog.e(TAG, "shareToMobileQQ -- error: " + Constants.MSG_SHARE_GETIMG_ERROR);
+                                    }
+                                    OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK",
+                                            Constants.DEFAULT_UIN, mToken.getAppId(), String.valueOf(0),
+                                            SystemClock.elapsedRealtime(), 0, 1, Constants.MSG_SHARE_GETIMG_ERROR);
+                                    return;
+                                }
+                                // 只分享文字
+                                // params.putString("imageUrl", ""); //替换图片地址为空
+                            }
+                            doShareToQQ(activity, params, listener);
+                        }
+
+						@Override
+						public void batchSaved(int code, ArrayList<String> paths) {
+							// TODO Auto-generated method stub
+
+						}
+                    });
+                }
+            } else {
+                // 定向分享传的是本地图片
+                // 本地图片先清空ImageUrl
+                params.putString(SHARE_TO_QQ_IMAGE_URL, null);
+                if (Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_4_3_0)) {
+                    // 4.3以下的版本, 丢弃本地图片, 直接分享
+                    // 低版本本地图片在手Q的表现为imageUrl和localPath都为null
+                    SLog.d(TAG, "shareToMobileQQ -- QQ Version is < 4.3.0 ");
+                    doShareToQQ(activity, params, listener);
+                } else {
+                    // 4.3以上的版本(含4.3)先压缩本地图片至140px, 再将压缩后的图片存储, 把新图片的路径传给SHARE_TO_QQ_IMAGE_LOCAL_URL
+                    // 本地图片在手Q中的表现为imageUrl为空(待手Q上传图片后获取到网络地址再在手Q中赋值), localPath有值
+                    SLog.d(TAG, "shareToMobileQQ -- QQ Version is > 4.3.0 ");
+                    AsynScaleCompressImage.scaleCompressImage(activity, imageUrl, new AsynLoadImgBack() {
+                        @Override
+                        public void saved(int code, String realName) {
+                            if (code == 0) {
+                                params.putString(SHARE_TO_QQ_IMAGE_LOCAL_URL, realName);
+                            } else {
+                                if (TextUtils.isEmpty(title) && TextUtils.isEmpty(summary)) {
+                                    if (listener != null) {
+                                        listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                                                Constants.MSG_SHARE_GETIMG_ERROR, null));
+                                        SLog.e(TAG, "shareToMobileQQ -- error: " + Constants.MSG_SHARE_GETIMG_ERROR);
+                                    }
+                                    OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK",
+                                            Constants.DEFAULT_UIN, mToken.getAppId(), String.valueOf(0),
+                                            SystemClock.elapsedRealtime(), 0, 1, Constants.MSG_SHARE_GETIMG_ERROR);
+                                    return;
+                                }
+                            }
+                            doShareToQQ(activity, params, listener);
+                        }
+
+						@Override
+						public void batchSaved(int code, ArrayList<String> paths) {
+							// TODO Auto-generated method stub
+
+						}
+                    });
+                }
+            }
+
+        } else {
+            doShareToQQ(activity, params, listener);
+        }
+        SLog.i(TAG, "shareToMobileQQ() -- end");
+    }
+
+    private void doShareToQQ(Activity activity, Bundle params, IUiListener listener) {
+        SLog.i(TAG, "doShareToQQ() -- start");
+
+        StringBuffer url = new StringBuffer(SHAREQQ_SCHEME_URL);
+        String imageUrl = params.getString(SHARE_TO_QQ_IMAGE_URL); // 网络地址
+        String title = params.getString(SHARE_TO_QQ_TITLE);
+        String summary = params.getString(SHARE_TO_QQ_SUMMARY);
+        String targetUrl = params.getString(SHARE_TO_QQ_TARGET_URL);
+        String audioUrl = params.getString(SHARE_TO_QQ_AUDIO_URL);
+        int shareType = params.getInt(SHARE_TO_QQ_KEY_TYPE,SHARE_TO_QQ_TYPE_DEFAULT);
+        String arkInfo = params.getString(SHARE_TO_QQ_ARK_INFO);
+
+        // 添加扩展标志位
+        int extFlags = params.getInt(SHARE_TO_QQ_EXT_INT,0);
+        String extStr = params.getString(SHARE_TO_QQ_EXT_STR);
+
+        String appName = Util.getApplicationLable(activity);
+        if (appName == null) {
+            // appName理论上不可能为null, 所以这个逻辑几乎没有用处.
+            appName = params.getString(SHARE_TO_QQ_APP_NAME);
+        }
+        String imageLocalUrl = params.getString(SHARE_TO_QQ_IMAGE_LOCAL_URL); // 本地地址
+
+        String appId = mToken.getAppId();
+        String openId = mToken.getOpenId();
+
+        SLog.v(TAG, "doShareToQQ -- openid: " + openId);
+
+        if (!TextUtils.isEmpty(imageUrl)) {
+            url.append("&image_url=" + Base64.encodeToString(Util.getBytesUTF8(imageUrl), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(imageLocalUrl)) {
+        	url.append("&file_data=" + Base64.encodeToString(Util.getBytesUTF8(imageLocalUrl), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(title)) {
+        	url.append("&title=" + Base64.encodeToString(Util.getBytesUTF8(title), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(summary)) {
+        	url.append("&description=" + Base64.encodeToString(Util.getBytesUTF8(summary), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appId)) {
+        	url.append("&share_id=" + appId);
+        }
+        if (!TextUtils.isEmpty(targetUrl)) {
+        	url.append("&url=" + Base64.encodeToString(Util.getBytesUTF8(targetUrl), Base64.NO_WRAP));
+        }
+        if (!TextUtils.isEmpty(appName)) {
+        	String appN = appName;
+            if (appName.length() > 20) {
+            	appN = appName.substring(0, 20) + "...";
+            }
+            url.append("&app_name=" + Base64.encodeToString(Util.getBytesUTF8(appN), Base64.NO_WRAP));
+        }
+
+        if (!TextUtils.isEmpty(openId)) {
+        	url.append("&open_id=" + Base64.encodeToString(Util.getBytesUTF8(openId), Base64.NO_WRAP));
+        }
+
+        // 音乐分享
+        if (!TextUtils.isEmpty(audioUrl)){
+            url.append("&audioUrl=" + Base64.encodeToString(Util.getBytesUTF8(audioUrl), Base64.NO_WRAP));
+        }
+        // zivon: 加上分享类型, 用string类型传入
+        url.append("&" + SHARE_TO_QQ_KEY_TYPE + "=" + Base64.encodeToString(Util.getBytesUTF8(String.valueOf(shareType)), Base64.NO_WRAP));
+
+        //加上ARK信息
+        if(!TextUtils.isEmpty(arkInfo)) {
+            url.append("&" + SHARE_TO_QQ_ARK_INFO + "=" + Base64.encodeToString(Util.getBytesUTF8(arkInfo), Base64.NO_WRAP));
+        }
+
+        // 添加扩展字段  by august
+        if(!TextUtils.isEmpty(extStr)){
+            url.append("&" + SHARE_TO_QQ_EXT_STR + "=" + Base64.encodeToString(Util.getBytesUTF8(extStr), Base64.NO_WRAP));
+        }
+        url.append("&" + SHARE_TO_QQ_EXT_INT + "=" + Base64.encodeToString(Util.getBytesUTF8(String.valueOf(extFlags)), Base64.NO_WRAP));
+        SLog.v(TAG, "doShareToQQ -- url: " + url.toString());
+
+        TencentStat.trackCustomEvent(Global.getContext(), mToken, "requireApi", "shareToNativeQQ");
+
+        Intent activityIntent = new Intent(Intent.ACTION_VIEW);
+        activityIntent.setData(Uri.parse(url.toString()));
+
+        //不知道为什么手Q没有登陆态时通过getCallingPackage获取不到packageName，这里传入一下
+        activityIntent.putExtra("pkg_name", activity.getPackageName());
+        if (Util.isQQVersionBelow(activity, SystemUtils.QQ_VERSION_NAME_4_6_0)) {
+            SLog.i(TAG, "doShareToQQ, qqver below 4.6.");
+            if (hasActivityForIntent(activityIntent)) {
+            	UIListenerManager.getInstance().setListenerWithRequestcode(
+            			Constants.REQUEST_OLD_SHARE, listener);
+            	startAssitActivity(activity,activityIntent,Constants.REQUEST_OLD_SHARE);
+            }
+        } else {
+        	SLog.i(TAG, "doShareToQQ, qqver greater than 4.6.");
+        	Object object = UIListenerManager.getInstance().setListnerWithAction(SystemUtils.QQ_SHARE_CALLBACK_ACTION, listener);
+            if (null != object) {// 取消上一次的调用
+                // ((IUiListener) object).onCancel(); // updated by hamlingong: 如果上一次的流程没完，下一次分享时不做cancel
+                SLog.i(TAG, "doShareToQQ, last listener is not null, cancel it.");
+            }
+            if (hasActivityForIntent(activityIntent)) {
+                startAssistActivity(activity, Constants.REQUEST_QQ_SHARE,activityIntent,true);
+            }
+        }
+        String reportType = Constants.VIA_REPORT_TYPE_SHARE_TO_QQ;
+        if (extFlags == 1) {
+        	reportType = Constants.VIA_REPORT_TYPE_SHARE_TO_QZONE;
+        }
+        if (hasActivityForIntent(activityIntent)) {
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SHARE_TO_QQ,
+            		reportType, Constants.VIA_ACT_TYPE_THREE, Constants.VIA_RESULT_SUCCESS,
+                    mViaShareQQType, Constants.VIA_NO_VALUE, Constants.VIA_CALL_SOURCE_SQ, Constants.VIA_NO_VALUE);
+            OpenSdkStatic.getInstance().reportHaboCgi(0, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN, mToken.getAppId(),
+                    String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1, "");
+        } else {
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SHARE_TO_QQ,
+            		reportType, Constants.VIA_ACT_TYPE_THREE, Constants.VIA_RESULT_FAIL,
+                    mViaShareQQType, Constants.VIA_NO_VALUE, Constants.VIA_CALL_SOURCE_SQ, Constants.VIA_NO_VALUE);
+            OpenSdkStatic.getInstance().reportHaboCgi(1, "SHARE_CHECK_SDK", Constants.DEFAULT_UIN, mToken.getAppId(),
+                    String.valueOf(0), SystemClock.elapsedRealtime(), 0, 1, "hasActivityForIntent fail");
+        }
+
+        SLog.i(TAG, "doShareToQQ() --end");
+    }
+
+    @Override
+    public void releaseResource() {
+       // TemporaryStorage.remove(SystemUtils.QQ_SHARE_CALLBACK_ACTION);
+    }
+}
+

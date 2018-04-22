@@ -1,0 +1,128 @@
+
+package com.tencent.open.report;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.OpenConfig;
+
+/**
+ * 统计上报策略配置类，用于定义触发上传条件的值
+ *
+ * @author jieshao
+ * @date 2013-02-22
+ */
+public class ReportConfig {
+
+    protected final static String SHARE_NAME = "reportConfig";
+    protected final static String KEY_LASTTIME = "lastTime";
+    protected final static String KEY_UIN = "uin";
+    /**以下为默认值，用于无法拉取到批量上报策略时使用*/
+    public final static int DefaultMaxCount = 1;
+    public final static int DefaultTimeInterval = 60;
+    public final static int DefaultFrequency = 100;
+    public final static int DefaultHttpRetryCount = 2;
+    public final static int DefaultViaSuccessRatioFrequencySuccess = 100;
+    public final static int DefaultViaSuccessRatioFrequencyFail = 100;
+
+    /** 移动终端平台类型 */
+    public final static String MOBILE_PLATFORM_ANDROID = "1";
+
+    /** 保存上次上报时间 */
+    public static void saveLastReportTime(long time) {
+        Context ctx = Global.getContext();
+        if (ctx == null) {
+            return;
+        }
+        Editor editor = getPreferences().edit();
+        editor.putLong(KEY_LASTTIME, time);
+        editor.commit();
+    }
+
+    /**保存上次上报的uin*/
+   public static void saveLastUin(String uin){
+        Context ctx = Global.getContext();
+       if (ctx == null) {
+           return;
+       }
+       Editor editor = getPreferences().edit();
+       editor.putString(KEY_UIN, uin);
+       editor.commit();
+   }
+
+   /**获取上次上报的uin*/
+   public static String getLastUin(){
+        Context ctx = Global.getContext();
+       if (ctx == null) {
+           return "";
+       }
+       SharedPreferences sharedPreferences = getPreferences();
+       return sharedPreferences.getString(KEY_UIN, "");
+   }
+
+   protected static SharedPreferences getPreferences(){
+        return Global.getContext().getSharedPreferences(SHARE_NAME, Context.MODE_PRIVATE);
+   }
+    /** 获得上次上报时间 */
+    public static long getLastReportTime() {
+        SharedPreferences sharedPreferences = Global.getContext()
+                .getSharedPreferences(SHARE_NAME, Context.MODE_PRIVATE);
+        long lastTime = sharedPreferences.getLong(KEY_LASTTIME, 0);
+        return lastTime;
+    }
+    /**获取批量上报策略条数*/
+    public static int getReportMaxCount(){
+        int reportMaxCount = OpenConfig.getInstance(Global.getContext(), null).getInt(
+                        "Common_BusinessReportMaxcount");
+        if(reportMaxCount == 0){
+            reportMaxCount = ReportConfig.DefaultMaxCount;
+        }
+        return reportMaxCount;
+//        return 3;   //这里改成1是为了方便应用中心的测试，正式时要改回去
+    }
+    /**获取批量上报策略间隔*/
+    public static long getReportTimeInterval(){
+        long reportTimeInterval = OpenConfig.getInstance(Global.getContext(), null).getLong(
+                        "Common_BusinessReportTimeinterval");
+        if(reportTimeInterval == 0){
+            reportTimeInterval = ReportConfig.DefaultTimeInterval;
+        }
+        return reportTimeInterval;
+    }
+    /**获取批量上报策略频率*/
+    public static int getReportFrequency(String appId){
+        if(Global.getContext() == null) {//第三方反馈OpenConfig(Context appContext, String appId)中的appContext为空;加个保护
+            return ReportConfig.DefaultFrequency;
+        }
+        int reportFrequency = OpenConfig.getInstance(Global.getContext(),
+                appId).getInt("Common_BusinessReportFrequency");
+        if (reportFrequency == 0) {
+            reportFrequency = ReportConfig.DefaultFrequency;
+        }
+        return reportFrequency;
+    }
+    /**获取批量上报http重试次数*/
+    public static int getReportHttpRetryCount(){
+        int reportHttpRetryCount = OpenConfig.getInstance(Global.getContext(), null).getInt("Common_HttpRetryCount");
+        if(reportHttpRetryCount == 0){
+            reportHttpRetryCount =ReportConfig.DefaultHttpRetryCount;
+        }
+        return reportHttpRetryCount;
+    }
+
+    /**Via成功率上报的采样频率*/
+    public static int getViaSuccessRatioFrequency(int ret){
+        int frequency;
+        if (ret == 0) {
+            frequency = OpenConfig.getInstance(Global.getContext(), null).getInt(
+                    "Common_ViaSuccessRatioFrequencySuccess");
+            frequency = frequency == 0 ? ReportConfig.DefaultViaSuccessRatioFrequencySuccess : frequency;
+        }else {
+            frequency = OpenConfig.getInstance(Global.getContext(), null).getInt("Common_ViaSuccessRatioFrequencyFail");
+            frequency = frequency == 0 ? ReportConfig.DefaultViaSuccessRatioFrequencyFail : frequency;
+        }
+        return frequency;
+    }
+}

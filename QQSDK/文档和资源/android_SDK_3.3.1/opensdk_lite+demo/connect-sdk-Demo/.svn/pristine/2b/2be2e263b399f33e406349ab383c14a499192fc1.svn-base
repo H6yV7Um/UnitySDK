@@ -1,0 +1,217 @@
+package com.tencent.open.report;
+
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.wifi.WifiInfo;
+import android.net.wifi.WifiManager;
+import android.os.Environment;
+import android.telephony.TelephonyManager;
+import android.text.TextUtils;
+import android.util.DisplayMetrics;
+import android.view.WindowManager;
+
+import java.util.Locale;
+
+/**
+ * 手机信息收集，后续信息收集可放入此处。<br/>
+ * 初版方法来自shasha同学的MobileInfoGather中的方法，感谢shasha同学贡献
+ *
+ * @author jieshao
+ * @date 2013-02-22
+ */
+public class MobileInfoUtil {
+
+    private static final String TAG = SLog.TAG + ".MobileInfoUtil";
+	/** 获取手机mac地址 */
+	public static String getLocalMacAddress() {
+		try {
+			Context ctx = Global.getContext();
+			if (null == ctx) {
+				return "";
+			}
+			WifiManager wifi = (WifiManager) ctx.getSystemService(Context.WIFI_SERVICE);
+			if (wifi == null) {
+				return "";
+			}
+
+			WifiInfo info = wifi.getConnectionInfo();
+			if (info == null) {
+				return "";
+			}
+
+			return info.getMacAddress();
+		} catch (SecurityException e) {
+			SLog.e(TAG, "getLocalMacAddress>>>", e);
+		}
+		return "";
+	}
+
+
+    private static String resolution;
+    /**
+     * 获取手机分辨率，如480*800
+     */
+    @SuppressWarnings("deprecation")
+    public static String getResolution(Context context) {
+        if (!TextUtils.isEmpty(resolution)) {
+            return resolution;
+        }
+        if (null == context) {
+            return "";
+        }
+        resolution = "";
+        WindowManager windowManager = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        if (null != windowManager) {
+            int screenWidth = windowManager.getDefaultDisplay().getWidth();
+            int screenHeight = windowManager.getDefaultDisplay().getHeight();
+            resolution = screenWidth + "x" + screenHeight;
+        }
+
+        return resolution;
+    }
+
+    /*
+     * shasharui 中文为 str ="cn"; 英文为 str ="en"; 日文为 str ="ja";
+     */
+
+    /** 获取手机当前语言 */
+	public static String getLanguage() {
+		return Locale.getDefault().getLanguage();
+	}
+
+	// add by toddzhao,  imei信息敏感，不建议频繁读取，且imei基本不会变化，所以用静态变量存储
+	static String g_Imei = null;
+
+	public static String getImei(Context ctx) {
+		if (g_Imei != null && g_Imei.length() > 0) {
+			return g_Imei;
+		}
+		if (null == ctx) {
+			return "";
+		}
+
+		// 如果获取service失败，为null，或者因为权限问题导致为空，则返回""
+		try {
+			TelephonyManager telephonyManager = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+            g_Imei = telephonyManager.getDeviceId();
+            return g_Imei;
+		} catch (Exception e) {
+			return "";
+		}
+	}
+
+    // add by hamlingong, imsi信息敏感，不建议频繁读取，且imsi基本不会变化，所以用静态变量存储
+    static String g_Imsi = null;
+
+    public static String getImsi(Context ctx) {
+        if (g_Imsi != null && g_Imsi.length() > 0) {
+            return g_Imsi;
+        }
+        if (null == ctx) {
+            return "";
+        }
+
+        // 如果获取service失败，为null，或者因为权限问题导致为空，则返回""
+        try {
+            TelephonyManager telephonyManager = (TelephonyManager) ctx.getSystemService(Context.TELEPHONY_SERVICE);
+            g_Imsi = telephonyManager.getSimSerialNumber();
+            return g_Imsi;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    // add by hamlingong, 获取Android Id信息
+    static String g_Android_Id = null;
+
+    public static String getAndroidId(Context ctx) {
+        if (g_Android_Id != null && g_Android_Id.length() > 0) {
+            return g_Android_Id;
+        }
+        if (null == ctx) {
+            return "";
+        }
+
+        // 如果获取service失败，为null，或者因为权限问题导致为空，则返回""
+        try {
+            g_Android_Id = android.provider.Settings.Secure.getString(ctx.getContentResolver(),
+                    android.provider.Settings.Secure.ANDROID_ID);
+            return g_Android_Id;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+	private static String deviceinfo = null;
+
+	/**
+	 * add by toddzhao, 2013-05-08 cgi监控上报时，detai附带系统信息
+	 *
+	 * @return
+	 */
+	public static String getDeviceinfoForCgiReport(Context ctx) {
+
+		try {
+            if (deviceinfo == null) {
+                WindowManager manager = (WindowManager) ctx
+                        .getSystemService(Context.WINDOW_SERVICE);
+                DisplayMetrics displayMetrics = new DisplayMetrics();
+                manager.getDefaultDisplay().getMetrics(displayMetrics);
+
+                StringBuilder builder = new StringBuilder();
+                {
+                    builder.append("imei=").append(MobileInfoUtil.getImei(ctx)).append('&');
+                    builder.append("model=").append(android.os.Build.MODEL).append('&');
+                    builder.append("os=").append(android.os.Build.VERSION.RELEASE).append('&');
+                    builder.append("apilevel=").append(android.os.Build.VERSION.SDK_INT)
+                            .append('&');
+
+                    String apn = APNUtil.getApn(ctx);
+                    apn = (apn == null ? "" : apn);
+
+                    builder.append("network=").append(apn).append('&');
+                    builder.append("sdcard=")
+                            .append(Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED) ? 1 : 0)
+                            .append('&');
+                    builder.append("display=").append(displayMetrics.widthPixels).append('*')
+                            .append(displayMetrics.heightPixels).append('&');
+                    builder.append("manu=").append(android.os.Build.MANUFACTURER).append("&");
+                    builder.append("wifi=").append(APNUtil.getNetWorkName(ctx));
+                }
+                deviceinfo = builder.toString();
+            }
+			return deviceinfo;
+		} catch (Exception e) {
+			return null;
+		}
+	}
+
+	/**
+     * @param context
+     * @return
+     */
+    public static String getNetWorkName(Context context){
+        if (null == context) {
+            return "";
+        }
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        if(cm == null) {
+            return "MOBILE";
+        }
+        NetworkInfo info = cm.getActiveNetworkInfo();
+        if(info != null) {
+            return info.getTypeName();
+        } else {
+            return "MOBILE";
+        }
+    }
+
+    /** 获取手机当前所在城市，目前返回为空 */
+    public static String getCity() {
+        return "";
+    }
+}

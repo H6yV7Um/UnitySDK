@@ -1,0 +1,247 @@
+
+package com.tencent.open;
+
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.AsyncTask;
+import android.os.Environment;
+import android.text.TextUtils;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Locale;
+
+import com.tencent.open.log.SLog;
+
+public class VoiceHelper extends AsyncTask<Bitmap, Void, HashMap<String, Object>> {
+
+    private static final String TAG = SLog.TAG + ".VoiceHelper";
+    
+    private static final SimpleDateFormat sdf2 = new SimpleDateFormat(
+            "yyyy-MM-dd-HHmmss", Locale.CHINA);
+
+    private static final String EXT_SDCARD_PATH = "/mnt/sdcard-ext"; // 用于某些第三方厂商sdcard
+
+    private static final String RESULT_TYPE = "ResultType";
+    private static final String RESULT_VALUE = "ResultValue";
+
+    private static final int RESULT_TYPE_EXCEPTION = 0;
+    private static final int RESULT_TYPE_NORMAL = 1;
+
+    private ImageCallback mCallBack;
+
+    public VoiceHelper(ImageCallback callBack) {
+        mCallBack = callBack;
+    }
+
+    @Override
+    protected HashMap<String, Object> doInBackground(Bitmap... params) {
+
+        HashMap<String, Object> result = new HashMap<String, Object>();
+
+        try {
+            Bitmap image = params[0];
+
+            if(image != null){
+                String filePath = "";
+
+                if (image.getWidth() > 320 || image.getHeight() > 320) {
+                    Bitmap compBmp = comp(image);
+                    filePath = saveImageToSDCard(compBmp);
+                    compBmp.recycle();
+                    compBmp = null;
+                }else{
+                    filePath = saveImageToSDCard(image);
+                }
+
+                image.recycle();
+                image = null;
+
+                result.put(RESULT_TYPE, RESULT_TYPE_NORMAL);
+                result.put(RESULT_VALUE, filePath);
+            }
+        } catch (Exception e) {
+            result.put(RESULT_TYPE, RESULT_TYPE_EXCEPTION);
+            result.put(RESULT_VALUE, e.getMessage());
+        }
+
+        return result;
+    }
+
+    @Override
+    protected void onPostExecute(HashMap<String, Object> result) {
+        if((Integer)result.get(RESULT_TYPE) == RESULT_TYPE_NORMAL){
+            mCallBack.onSuccess((String)result.get(RESULT_VALUE));
+        } else {
+            mCallBack.onFailed((String)result.get(RESULT_VALUE));
+        }
+
+        super.onPostExecute(result);
+    }
+
+    /**
+     * 用于图片处理
+     */
+    public interface ImageCallback {
+        public void onSuccess(String result);
+        public void onFailed(String failMessage);
+    }
+
+    private Bitmap comp(Bitmap image) {
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        image.compress(Bitmap.CompressFormat.JPEG, 100, baos);
+        if( baos.toByteArray().length / 1024>1024) {//判断如果图片大于1M,进行压缩避免在生成图片（BitmapFactory.decodeStream）时溢出
+            baos.reset();//重置baos即清空baos
+            image.compress(Bitmap.CompressFormat.JPEG, 50, baos);//这里压缩50%，把压缩后的数据存放到baos中
+        }
+        ByteArrayInputStream isBm = new ByteArrayInputStream(baos.toByteArray());
+        BitmapFactory.Options newOpts = new BitmapFactory.Options();
+        //开始读入图片，此时把options.inJustDecodeBounds 设回true了
+        newOpts.inJustDecodeBounds = true;
+        Bitmap bitmap = null;
+        try {
+            BitmapFactory.decodeStream(isBm, null, newOpts);
+        } catch (OutOfMemoryError e) {
+            SLog.i(TAG, "VoiceHelper decodeStream has OutOfMemoryError!");
+        }
+
+        newOpts.inJustDecodeBounds = false;
+        //int w = newOpts.outWidth;
+        //int h = newOpts.outHeight;
+
+        float hh = 320f;
+        float ww = 320f;
+        //缩放比。由于是固定比例缩放，只用高或者宽其中一个数据进行计算即可
+        int be = calculateInSampleSize(newOpts, 320, 320);
+
+        if (be <= 0) {
+            be = 1;
+        }
+
+        SLog.i(TAG, "comp be=" + be);
+        newOpts.inSampleSize = be;//设置缩放比例
+        //重新读入图片，注意此时已经把options.inJustDecodeBounds 设回false了
+        isBm = new ByteArrayInputStream(baos.toByteArray());
+        try {
+            bitmap = BitmapFactory.decodeStream(isBm, null, newOpts);
+        } catch (OutOfMemoryError e) {
+            SLog.i(TAG, "VoiceHelper decodeStream has OutOfMemoryError!");
+        }
+
+        return bitmap;//压缩好比例大小后再进行质量压缩
+    }
+
+    //计算图片的缩放值
+    private int calculateInSampleSize(BitmapFactory.Options options,int reqWidth, int reqHeight) {
+        final int height = options.outHeight;
+        final int width = options.outWidth;
+        int inSampleSize = 1;
+
+        if (height > reqHeight || width > reqWidth) {
+                 final int heightRatio = Math.round((float) height/ (float) reqHeight);
+                 final int widthRatio = Math.round((float) width / (float) reqWidth);
+                 inSampleSize = heightRatio < widthRatio ? heightRatio : widthRatio;
+        }
+            return inSampleSize;
+    }
+    /**
+     * 清除图片文件
+     */
+    public static void clearImageCacheFile(String imageFilePath){
+        if(!TextUtils.isEmpty(imageFilePath)) {
+            try {
+                File file = new File(imageFilePath);
+                if(file.exists()){
+                    file.delete();
+                }
+            } catch (Exception e) {
+            }
+        }
+    }
+
+    /**
+     * 保存bitmap到sdcard上
+     */
+    private String saveImageToSDCard(Bitmap image){
+        FileOutputStream fOut = null;
+        String imageFilePath = "";
+        try {
+            String fileName = getDateStringWithoutSpace(System.currentTimeMillis()) + ".png";
+            String path = getSDCardPath() + File.separator + ".AppCenterWebBuffer";
+            imageFilePath = path + File.separator + fileName;
+
+            File mWorkingPath = new File(path);
+            if (!mWorkingPath.exists()) {
+                if (!mWorkingPath.mkdirs()) {
+                }
+            }
+
+            File f = new File(imageFilePath);
+            if(f.exists()){
+                f.delete();
+            }
+            f.createNewFile();
+
+            fOut = new FileOutputStream(f);
+
+            image.compress(Bitmap.CompressFormat.PNG, 100, fOut);
+
+            fOut.flush();
+
+        } catch (Exception e) {
+            imageFilePath = "";
+        } finally {
+            if(fOut != null){
+                try {
+                    fOut.close();
+                } catch (IOException e) {
+                }
+            }
+        }
+
+        return imageFilePath;
+    }
+
+    private String getSDCardPath() {
+        String path = "."; //路径不存在时不能赋值为空,否则判断路径是否存在会始终返回真
+        String status = Environment.getExternalStorageState();
+        if (status.equals(Environment.MEDIA_MOUNTED)) {
+            path = Environment.getExternalStorageDirectory().getAbsolutePath();
+        } else {
+            File file = new File(EXT_SDCARD_PATH);
+            if (file.isDirectory()) {
+                path = EXT_SDCARD_PATH;
+            }
+        }
+        return path;
+    }
+
+    private String getDateStringWithoutSpace(long time) {
+        Date d = new Date(time);
+        return sdf2.format(d);
+    }
+
+    /**
+     * 配置一个兼容扩展sdcard的检查
+     *
+     * @return 是否挂载sdcard
+     */
+    public static boolean hasSDCard() {
+        String status = Environment.getExternalStorageState();
+        if (status.equals(Environment.MEDIA_MOUNTED)) {
+            return true;
+        } else {
+            File file = new File(EXT_SDCARD_PATH);
+            if (file.isDirectory()) {
+                return true;
+            }
+            return false;
+        }
+    }
+}

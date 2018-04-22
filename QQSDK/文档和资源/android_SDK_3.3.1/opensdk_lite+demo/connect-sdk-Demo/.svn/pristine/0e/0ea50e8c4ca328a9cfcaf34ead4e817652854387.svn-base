@@ -1,0 +1,28 @@
+package com.tencent.open.report;
+
+import java.io.Serializable;
+import java.util.HashMap;
+
+import android.os.Bundle;
+
+/**
+ * 将业务数据序列化
+ * 
+ * @author hamlingong
+ *
+ */
+public class BaseData implements Serializable {
+
+    // 序列化ID
+	private static final long serialVersionUID = 10000L;
+	public final HashMap<String, String> attrs;
+	
+	public BaseData(Bundle params) {
+		attrs = new HashMap<String, String>();
+		if (params != null) {
+			for (String key : params.keySet()) {
+				attrs.put(key, params.getString(key));
+			}
+		}
+	}
+}

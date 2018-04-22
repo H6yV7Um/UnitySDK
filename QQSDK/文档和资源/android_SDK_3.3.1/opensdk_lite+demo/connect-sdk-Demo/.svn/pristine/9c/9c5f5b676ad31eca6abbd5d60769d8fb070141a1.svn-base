@@ -1,0 +1,103 @@
+package com.tencent.connect.avatar;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.os.Bundle;
+
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.tauth.IUiListener;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.Global;
+
+public class QQAvatar extends BaseApi{
+	private static final String ACTION_AVATAR = "action_avatar";
+
+	private IUiListener mListener;
+	public QQAvatar(QQToken token) {
+		super(token);
+	}
+
+	private Intent getAvaterActivityIntent(Activity activity) {
+		Intent intent = new Intent();
+        intent.setClass(activity, ImageActivity.class);
+        return intent;
+	}
+
+	public void setAvatar(Activity activity, Uri picUri, IUiListener listener, int exitAnim) {
+		if (mListener != null) {
+			mListener.onCancel();
+		}
+
+		mListener = listener;
+		Bundle params = new Bundle();
+		params.putString(AvatarConstants.PARAM_AVATAR_URI, picUri.toString());
+		params.putInt("exitAnim", exitAnim);
+
+		params.putString(Constants.PARAM_APP_ID, mToken.getAppId());
+        params.putString(Constants.PARAM_ACCESS_TOKEN, mToken.getAccessToken());
+        params.putLong(Constants.PARAM_EXPIRES_IN, mToken.getExpireTimeInSecond());
+        params.putString(Constants.PARAM_OPEN_ID, mToken.getOpenId());
+
+		Intent avaterIntent = getAvaterActivityIntent(activity);
+
+        if (hasActivityForIntent(avaterIntent)) {
+            showAvaterActivity(activity, params,avaterIntent);
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SET_AVATAR,
+                            Constants.VIA_REPORT_TYPE_SET_AVATAR, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                            Constants.VIA_RESULT_SUCCESS);
+        } else {
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(), Constants.VIA_SET_AVATAR,
+                    Constants.VIA_REPORT_TYPE_SET_AVATAR, Constants.VIA_ACT_TYPE_EIGHTEEN, Constants.VIA_RESULT_FAIL);
+        }
+	}
+
+	private void showAvaterActivity(Activity activity, Bundle params, Intent activityIntent) {
+		setBundleParams(params);
+		activityIntent.putExtra(Constants.KEY_ACTION, ACTION_AVATAR);
+		activityIntent.putExtra(Constants.KEY_PARAMS, params);
+		
+		UIListenerManager.getInstance().setListenerWithRequestcode(
+				Constants.REQUEST_AVATER, mListener);
+
+		startAssitActivity(activity,activityIntent,Constants.REQUEST_AVATER);
+	}
+
+	private void setBundleParams(Bundle bundle) {
+		if (mToken != null) {
+			bundle.putString(Constants.PARAM_APP_ID, mToken.getAppId());
+            if (mToken.isSessionValid()) {
+            	bundle.putString(Constants.PARAM_KEY_STR,
+                		mToken.getAccessToken());
+            	bundle.putString(Constants.PARAM_KEY_TYPE, "0x80");
+            }
+
+            String openId = mToken.getOpenId();
+            if (openId != null) {
+            	bundle.putString(Constants.PARAM_HOPEN_ID, openId);
+            }
+
+            bundle.putString(Constants.PARAM_PLATFORM, "androidqz");
+
+            // 从本地sharedpreference取出pf，填入params中
+            try {
+                SharedPreferences pfShared = Global.getContext().getSharedPreferences(
+                        Constants.PREFERENCE_PF,
+                        Context.MODE_PRIVATE);
+                String pf = pfShared.getString(Constants.PARAM_PLATFORM_ID, Constants.DEFAULT_PF);
+                bundle.putString(Constants.PARAM_PLATFORM_ID, pf);
+            } catch (Exception e) {
+                e.printStackTrace();
+                bundle.putString(Constants.PARAM_PLATFORM_ID, Constants.DEFAULT_PF);
+            }
+        }
+
+		bundle.putString("sdkv", Constants.SDK_VERSION);
+		bundle.putString("sdkp", "a");
+	}
+}

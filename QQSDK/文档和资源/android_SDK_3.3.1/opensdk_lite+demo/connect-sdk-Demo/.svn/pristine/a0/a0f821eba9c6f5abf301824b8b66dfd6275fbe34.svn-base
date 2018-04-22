@@ -1,0 +1,45 @@
+package com.tencent.open.yyb;
+
+import android.os.Parcel;
+import android.os.Parcelable;
+
+public class ShareModel implements Parcelable {
+
+	public String mTitle;
+	public String mDescription;
+	public String mIconUrl;
+	public String mTargetUrl;
+	
+	@Override
+	public int describeContents() {
+		// TODO Auto-generated method stub
+		return 0;
+	}
+
+	@Override
+	public void writeToParcel(Parcel dest, int flags) {
+		dest.writeString(mTitle);
+		dest.writeString(mDescription);
+		dest.writeString(mIconUrl);
+		dest.writeString(mTargetUrl);
+	}
+	
+	public static final Parcelable.Creator<ShareModel> CREATOR = new Creator<ShareModel>() {
+
+		@Override
+		public ShareModel createFromParcel(Parcel source) {
+			ShareModel shareAppModel = new ShareModel();
+			shareAppModel.mTitle = source.readString();
+			shareAppModel.mDescription = source.readString();
+			shareAppModel.mIconUrl = source.readString();
+			shareAppModel.mTargetUrl = source.readString();
+			return shareAppModel;
+		}
+
+		@Override
+		public ShareModel[] newArray(int size) {
+			return null;
+		}
+	};
+
+}

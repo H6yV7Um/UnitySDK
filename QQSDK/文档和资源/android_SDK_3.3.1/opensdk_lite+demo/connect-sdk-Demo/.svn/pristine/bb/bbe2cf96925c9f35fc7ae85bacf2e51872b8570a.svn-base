@@ -1,0 +1,272 @@
+/**
+ * Name : Utils.java<br>
+ * Copyright : Copyright (c) Tencent Inc. All rights reserved.<br>
+ * Description : Utilities Set of Other Smaller Ones<br>
+ */
+package com.tencent.open.log;
+
+import java.io.File;
+import java.text.SimpleDateFormat;
+import android.annotation.SuppressLint;
+import android.os.Environment;
+import android.os.StatFs;
+import com.tencent.open.utils.Global;
+
+/**
+ * 工具集，包含文件、字符串、位运算等等
+ *
+ * @author lewistian
+ *
+ */
+public class LogUtils
+{
+    /**
+     * 位运算
+     *
+     * @author lewistian
+     *
+     */
+    public static final class Bit
+    {
+        public static final int add(int source, int sub)
+        {
+            return source | sub;
+        }
+
+        public static final boolean has(int source, int sub)
+        {
+            return sub == (source & sub);
+        }
+
+        public static final int remove(int source, int sub)
+        {
+            return source ^ (source & sub);
+        }
+
+        public static final int log2(int source)
+        {
+            return (int) (Math.log(source) / Math.log(2));
+        }
+    }
+
+    /**
+     * 字符串工具集
+     *
+     * @author lewistian
+     *
+     */
+    public static final class StrUtils {
+        /**
+         * 空字符串常量 <br>
+         * <br>
+         * <i>佛曰：四大皆空</i>
+         */
+        public static final String EMPTY = "";
+        /**
+         * "不可用"字符串常量
+         */
+        public static final String NOT_AVALIBLE = "N/A";
+
+        /**
+         * 创建指定格式的时间格式化对象
+         *
+         * @param pattern
+         *            时间格式，形如"yyyy-MM-dd HH-mm-ss.SSS"
+         * @return Format 时间格式化对象
+         */
+        @SuppressLint("SimpleDateFormat")
+        public static SimpleDateFormat createDataFormat(String pattern) {
+            return new SimpleDateFormat(pattern);
+        }
+
+        /**
+         * 判断字符串是否为空内容/空指针
+         *
+         * @param str
+         *            字符串
+         * @return 是空内容/空指针，返回true，否则返回false
+         */
+        public static boolean isTextEmpty(String str) {
+            return (str == null) || (str.length() < 1);
+        }
+    }
+
+    /**
+     * 文件工具集
+     *
+     * @author lewistian
+     *
+     */
+    public static final class FileUtils {
+        /**
+         * 尝试删除文件/文件夹。如果删除失败，尝试在虚拟机退出时删除。
+         *
+         * @param fileName
+         *            文件/文件夹路径
+         * @return 删除成功/失败
+         */
+        public static boolean deleteFile(File file) {
+            if (file != null) {
+                // 是文件，直接删除
+                if (file.isFile()) {
+                    if (!file.delete()) {
+                        file.deleteOnExit();
+
+                        return false;
+                    } else {
+                        return true;
+                    }
+                }
+                // 是目录，递归删除
+                else if (file.isDirectory()) {
+                    File[] subFiles = file.listFiles();
+                    if (subFiles == null || subFiles.length == 0) {
+                        return false;
+                    }
+
+                    for (File subFile : subFiles) {
+                        deleteFile(subFile);
+                    }
+
+                    return file.delete();
+                }
+                // 那你是啥嘛……
+                else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+    }
+
+    /**
+     * 存储器信息收集类 <br>
+     * <br>
+     * 为了保证入口的简洁和代码的可读性，请使用{@link com.tencent.base.os.Device.Storage}
+     *
+     * @author lewistian
+     *
+     */
+    public static final class StorageDash {
+        /**
+         * 是否有外部存储
+         *
+         * @return -
+         */
+        public static boolean hasExternal() {
+            return Environment.MEDIA_MOUNTED.equals(Environment.getExternalStorageState());
+        }
+
+        /**
+         * 是否有只读的外部存储
+         *
+         * @return -
+         */
+        public static boolean hasExternalReadable() {
+            String state = Environment.getExternalStorageState();
+
+            return Environment.MEDIA_MOUNTED.equals(state) || (Environment.MEDIA_MOUNTED_READ_ONLY.equals(state));
+        }
+
+        /**
+         * 获得外部存储器的信息
+         *
+         * @return -
+         */
+        public static StorageInfo getExternalInfo() {
+            if (!hasExternalReadable()) {
+                return null;
+            }
+
+            return StorageInfo.fromFile(Environment.getExternalStorageDirectory());
+        }
+
+        /**
+         * 获得内部存储器的信息
+         *
+         * @return -
+         */
+        public static StorageInfo getInnerInfo() {
+            if (null == Global.getFilesDir()) {
+                return null;
+            }
+            return StorageInfo.fromFile(Global.getFilesDir());
+        }
+    }
+
+    /**
+     * 存储器信息
+     *
+     * @autho lewistian
+     * @see StorageDash
+     */
+    public static class StorageInfo {
+        private File rootPath;
+        private long totalSize;
+        private long availableSize;
+
+        public File getRootPath() {
+            return rootPath;
+        }
+
+        public void setRootPath(File rootPath) {
+            this.rootPath = rootPath;
+        }
+
+        /**
+         * 获得存储器总容量
+         *
+         * @return -
+         */
+        public long getTotalSize() {
+            return totalSize;
+        }
+
+        public void setTotalSize(long totalSize) {
+            this.totalSize = totalSize;
+        }
+
+        /**
+         * 获得存储器可用容量
+         *
+         * @return -
+         */
+        public long getAvailableSize() {
+            return availableSize;
+        }
+
+        public void setAvailableSize(long availableSize) {
+            this.availableSize = availableSize;
+        }
+
+        /**
+         * 从文件对象获得存储器信息
+         *
+         * @param path
+         *            文件对象
+         * @return -
+         */
+        public static StorageInfo fromFile(File path) {
+            StorageInfo info = new StorageInfo();
+
+            info.setRootPath(path);
+
+            StatFs fileSystem = new StatFs(path.getAbsolutePath());
+
+            long blockSize = fileSystem.getBlockSize();
+            long totalBlocks = fileSystem.getBlockCount();
+            long availableBlocks = fileSystem.getAvailableBlocks();
+
+            info.setTotalSize(totalBlocks * blockSize);
+            info.setAvailableSize(availableBlocks * blockSize);
+
+            return info;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("[%s : %d / %d]", getRootPath().getAbsolutePath(), getAvailableSize(), getTotalSize());
+        }
+    }
+}

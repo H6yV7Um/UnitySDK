@@ -1,0 +1,1083 @@
+package com.tencent.open.utils;
+
+import java.io.ByteArrayOutputStream;
+import java.io.CharConversionException;
+import java.io.EOFException;
+import java.io.FileInputStream;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InvalidClassException;
+import java.io.InvalidObjectException;
+import java.io.NotActiveException;
+import java.io.NotSerializableException;
+import java.io.OptionalDataException;
+import java.io.StreamCorruptedException;
+import java.io.SyncFailedException;
+import java.io.UTFDataFormatException;
+import java.io.UnsupportedEncodingException;
+import java.io.WriteAbortedException;
+import java.net.BindException;
+import java.net.ConnectException;
+import java.net.HttpRetryException;
+import java.net.MalformedURLException;
+import java.net.NoRouteToHostException;
+import java.net.PortUnreachableException;
+import java.net.ProtocolException;
+import java.net.Socket;
+import java.net.SocketTimeoutException;
+import java.net.URLEncoder;
+import java.net.UnknownHostException;
+import java.net.UnknownServiceException;
+import java.nio.channels.ClosedChannelException;
+import java.nio.channels.FileLockInterruptionException;
+import java.nio.charset.MalformedInputException;
+import java.nio.charset.UnmappableCharacterException;
+import java.security.KeyManagementException;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
+import java.security.UnrecoverableKeyException;
+import java.security.cert.CertificateException;
+import java.security.cert.X509Certificate;
+import java.util.InvalidPropertiesFormatException;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.ZipException;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLHandshakeException;
+import javax.net.ssl.SSLKeyException;
+import javax.net.ssl.SSLPeerUnverifiedException;
+import javax.net.ssl.SSLProtocolException;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
+import javax.net.ssl.X509TrustManager;
+
+import org.apache.http.ConnectionClosedException;
+import org.apache.http.Header;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHost;
+import org.apache.http.HttpResponse;
+import org.apache.http.HttpVersion;
+import org.apache.http.MalformedChunkCodingException;
+import org.apache.http.NoHttpResponseException;
+import org.apache.http.StatusLine;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.HttpResponseException;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.client.methods.HttpUriRequest;
+import org.apache.http.conn.ClientConnectionManager;
+import org.apache.http.conn.ConnectTimeoutException;
+import org.apache.http.conn.params.ConnRoutePNames;
+import org.apache.http.conn.scheme.PlainSocketFactory;
+import org.apache.http.conn.scheme.Scheme;
+import org.apache.http.conn.scheme.SchemeRegistry;
+import org.apache.http.conn.ssl.SSLSocketFactory;
+import org.apache.http.entity.ByteArrayEntity;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.conn.tsccm.ThreadSafeClientConnManager;
+import org.apache.http.params.BasicHttpParams;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
+import org.apache.http.params.HttpProtocolParams;
+import org.apache.http.protocol.HTTP;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.Proxy;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.SystemClock;
+import android.text.TextUtils;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.mta.TencentStat;
+import com.tencent.open.report.ReportManager;
+import com.tencent.open.log.SLog;
+import com.tencent.tauth.IRequestListener;
+import com.tencent.open.utils.Util.Statistic;
+
+public class HttpUtils {
+    /* 以下的错误码，都隶属于IOException, 是对－2错误码的细分，目前只做cgi监控上报处理  ---->>>>> */
+
+    private static final int ERROR_IO_CharConversionException = -20;
+    private static final int ERROR_IO_CharacterCodingException_MalformedInputException = -21;
+    private static final int ERROR_IO_CharacterCodingException_UnmappableCharacterException = -22;
+    private static final int ERROR_IO_ClientProtocolException_HttpResponseException = -23;
+    private static final int ERROR_IO_ClosedChannelException = -24;
+    private static final int ERROR_IO_ConnectionClosedException = -25;
+    private static final int ERROR_IO_EOFException = -26;
+    private static final int ERROR_IO_FileLockInterruptionException = -27;
+    private static final int ERROR_IO_FileNotFoundException = -28;
+    private static final int ERROR_IO_HttpRetryException = -29;
+    private static final int ERROR_IO_InterruptedIOException_ConnectTimeoutException = -7;
+    private static final int ERROR_IO_InterruptedIOException_SocketTimeoutException = -8;
+    private static final int ERROR_IO_InvalidPropertiesFormatException = -30;
+    private static final int ERROR_IO_MalformedChunkCodingException = -31;
+    private static final int ERROR_IO_MalformedURLException = -3;
+    private static final int ERROR_IO_NoHttpResponseException = -32;
+    private static final int ERROR_IO_ObjectStreamException_InvalidClassException = -33;
+    private static final int ERROR_IO_ObjectStreamException_InvalidObjectException = -34;
+    private static final int ERROR_IO_ObjectStreamException_NotActiveException = -35;
+    private static final int ERROR_IO_ObjectStreamException_NotSerializableException = -36;
+    private static final int ERROR_IO_ObjectStreamException_OptionalDataException = -37;
+    private static final int ERROR_IO_ObjectStreamException_StreamCorruptedException = -38;
+    private static final int ERROR_IO_ObjectStreamException_WriteAbortedException = -39;
+    private static final int ERROR_IO_ProtocolException = -40;
+    private static final int ERROR_IO_SSLException_SSLHandshakeException = -41;
+    private static final int ERROR_IO_SSLException_SSLKeyException = -42;
+    private static final int ERROR_IO_SSLException_SSLPeerUnverifiedException = -43;
+    private static final int ERROR_IO_SSLException_SSLProtocolException = -44;
+    private static final int ERROR_IO_SocketException_BindException = -45;
+    private static final int ERROR_IO_SocketException_ConnectException = -46;
+    private static final int ERROR_IO_SocketException_NoRouteToHostException = -47;
+    private static final int ERROR_IO_SocketException_PortUnreachableException = -48;
+    private static final int ERROR_IO_SyncFailedException = -49;
+    private static final int ERROR_IO_UTFDataFormatException = -50;
+    private static final int ERROR_IO_UnknownHostException = -51;
+    private static final int ERROR_IO_UnknownServiceException = -52;
+    private static final int ERROR_IO_UnsupportedEncodingException = -53;
+    private static final int ERROR_IO_ZipException = -54;
+
+    /* IOException -2 错误码细分整理  <<<<<---- */
+
+	private static final int REQUEST_RETRY_TIME = 3;
+    private static final int SET_CONNECTION_TIMEOUT = 15 * 1000;
+    private static final int SET_SOCKET_TIMEOUT = 30 * 1000;
+
+    private static final String ENDLINE = "\r\n";
+    private static final String BOUNDRY = "3i2ndDfv2rTHiSisAbouNdArYfORhtTPEefj3q2f";
+
+    private static final String TAG = SLog.TAG + ".HttpUtils";
+
+	private HttpUtils() {
+	}
+
+	public static class HttpStatusException extends Exception {
+		private static final long serialVersionUID = 1L;
+		public final static String ERROR_INFO = "http status code error:";
+
+	    public HttpStatusException(String msg) {
+	        super(msg);
+	    }
+	}
+
+	public static class NetworkUnavailableException extends Exception {
+		private static final long serialVersionUID = 1L;
+		public final static String ERROR_INFO = "network unavailable";
+
+	    public NetworkUnavailableException(String msg) {
+	        super(msg);
+	    }
+	}
+
+    /**
+     * 同步访问TencentOpenApi的接口
+     *
+     * @param graphPath GraphApi中资源对象的路径（graph url中host之后参数之前的部分）
+     * @param params KV结构的参数
+     * @param httpMethod {@link Constants#HTTP_GET}或 {@link Constants#HTTP_POST}
+     * @return Tencent Graph API返回的json字符串
+     * @throws MalformedURLException
+     * @throws IOException
+     * @throws JSONException
+     * @throws HttpStatusException
+     * @throws NetworkUnavailableException
+     */
+    public static JSONObject request(QQToken token, Context ctx, String graphPath, Bundle params, String httpMethod)
+            throws IOException, JSONException, NetworkUnavailableException,
+            HttpStatusException {
+        SLog.v(TAG, "OpenApi request");
+        //params = fillParams(ctx, token, graphPath, params);
+
+        String url = graphPath;
+        String reportUrlString = graphPath;
+        if (!graphPath.toLowerCase().startsWith("http")) {
+            // url = Constants.GRAPH_BASE + graphPath;
+            // reportUrlString = Constants.GRAPH_BASE + graphPath;
+            // modify by milesxia 2013-01-21
+            url = ServerSetting.getInstance().getEnvUrl(ctx, ServerSetting.DEFAULT_URL_GRAPH_BASE)
+                    + graphPath;
+            reportUrlString = ServerSetting.getInstance().getEnvUrl(ctx,
+                    ServerSetting.DEFAULT_URL_GRAPH_BASE)
+                    + graphPath;
+        }
+        reportStat(ctx, token, graphPath);
+        JSONObject obj = null;
+        long startTime = SystemClock.elapsedRealtime();
+        int resultCode = 0;
+        long reqsize = 0;
+        long rspsize = 0;
+
+        int iRetryTime = 0;
+        int requestRetryCount = OpenConfig.getInstance(ctx, token.getAppId()).getInt(
+                "Common_HttpRetryCount");
+        SLog.v("OpenConfig_test", "config 1:Common_HttpRetryCount            config_value:"
+                + requestRetryCount + "   appid:" + token.getAppId() + "     url:"
+                + reportUrlString);
+        requestRetryCount = requestRetryCount == 0 ? REQUEST_RETRY_TIME : requestRetryCount;
+        SLog.v("OpenConfig_test", "config 1:Common_HttpRetryCount            result_value:"
+                + requestRetryCount + "   appid:" + token.getAppId() + "     url:"
+                + reportUrlString);
+
+        do {
+            iRetryTime++;
+
+            try {
+                Statistic stat = openUrl2(ctx, url, httpMethod, params);
+
+                String response = stat.response;
+                obj = Util.parseJson(response);
+                try {
+                    resultCode = obj.getInt("ret");
+                } catch (JSONException e) {
+                    // @FIXME 此处需要新增一类异常对象， 请在后续版本fix。
+                    resultCode = Constants.ERROR_JSON;
+                }
+                reqsize = stat.reqSize;
+                rspsize = stat.rspSize;
+                break;
+
+            } catch (ConnectTimeoutException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_CONNECTTIMEOUT;
+                reqsize = 0;
+                rspsize = 0;
+                if (iRetryTime < requestRetryCount) {// 最后一次通过异常抛出去。
+                    startTime = SystemClock.elapsedRealtime();  //重置开始时间
+                    continue;
+                } else {
+                    ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                    throw e;
+                }
+            } catch (SocketTimeoutException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_SOCKETTIMEOUT;
+                reqsize = 0;
+                rspsize = 0;
+
+                if (iRetryTime < requestRetryCount) {// 最后一次通过异常抛出去。
+                    startTime = SystemClock.elapsedRealtime();  //重置开始时间
+                    continue;
+                } else {
+                    ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                    throw e;
+                }
+
+                // 以下4类异常不用重试， 直接返回失败。
+            } catch (HttpStatusException e) {
+                e.printStackTrace();
+                String statusCode = e.getMessage();
+                try {
+                    // 取得http返回的错误码
+                    statusCode = statusCode.replace("http status code error:",
+                            "");
+                    resultCode = Integer.parseInt(statusCode);
+                } catch (Exception e2) {
+                    e2.printStackTrace();
+                    // 获取错误码失败，则上报默认错误码-9,表示是http返回码错误
+                    resultCode = Constants.ERROR_HTTPSTATUS_ERROR;
+                }
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            } catch (NetworkUnavailableException e) {
+                e.printStackTrace();
+                throw e;
+            } catch (MalformedURLException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_URL;
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            } catch (IOException e) {
+                e.printStackTrace();
+                //resultCode = Constants.ERROR_IO; //－2错误码彻底细分
+                resultCode = getErrorCodeFromException(e);
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            } catch (JSONException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_JSON;
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            }
+        } while (iRetryTime < requestRetryCount);
+        ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+        return obj;
+    }
+
+    public static void requestAsync(final QQToken token, final Context ctx, final String graphPath,
+            final Bundle params, final String httpMethod,
+            final IRequestListener listener) {
+        SLog.v(TAG, "OpenApi requestAsync");
+        new Thread() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject response = request(token, ctx, graphPath, params,
+                            httpMethod);
+                    if (listener != null){
+                        listener.onComplete(response);
+                        SLog.d(TAG, "OpenApi onComplete");
+                    }
+                } catch (MalformedURLException e) {
+                    if (listener != null) {
+                        listener.onMalformedURLException(e);
+                        SLog.e(TAG, "OpenApi requestAsync MalformedURLException", e);
+                    }
+                } catch (ConnectTimeoutException e) {
+                    if (listener != null) {
+                        listener.onConnectTimeoutException(e);
+                        SLog.e(TAG, "OpenApi requestAsync onConnectTimeoutException", e);
+                    }
+                } catch (SocketTimeoutException e) {
+                    if (listener != null) {
+                        listener.onSocketTimeoutException(e);
+                        SLog.e(TAG, "OpenApi requestAsync onSocketTimeoutException", e);
+                    }
+                } catch (NetworkUnavailableException e) {
+                    if (listener != null) {
+                        listener.onNetworkUnavailableException(e);
+                        SLog.e(TAG, "OpenApi requestAsync onNetworkUnavailableException", e);
+                    }
+                } catch (HttpStatusException e) {
+                    if (listener != null) {
+                        listener.onHttpStatusException(e);
+                        SLog.e(TAG, "OpenApi requestAsync onHttpStatusException", e);
+                    }
+                } catch (IOException e) {
+                    if (listener != null) {
+                        listener.onIOException(e);
+                        SLog.e(TAG, "OpenApi requestAsync IOException", e);
+                    }
+                } catch (JSONException e) {
+                    if (listener != null) {
+                        listener.onJSONException(e);
+                        SLog.e(TAG, "OpenApi requestAsync JSONException", e);
+                    }
+                } catch (Exception e) {
+                    if (listener != null) {
+                        listener.onUnknowException(e);
+                        SLog.e(TAG, "OpenApi requestAsync onUnknowException", e);
+                    }
+                }
+            }
+        }.start();
+    }
+
+    /**
+     * 非业务上报, 上报到即通, 同步给罗盘和腾讯分析
+     *
+     * @param graphPath
+     */
+    private static void reportStat(Context context, QQToken token, String graphPath) {
+        if (graphPath.indexOf("add_share") > -1
+                || graphPath.indexOf("upload_pic") > -1
+                || graphPath.indexOf("add_topic") > -1
+                || graphPath.indexOf("set_user_face") > -1
+                || graphPath.indexOf("add_t") > -1
+                || graphPath.indexOf("add_pic_t") > -1
+                || graphPath.indexOf("add_pic_url") > -1
+                || graphPath.indexOf("add_video") > -1) {
+            TencentStat.trackCustomEvent(context, token, "requireApi", graphPath);
+        }
+    }
+
+    public static int getErrorCodeFromException(IOException e) {
+        if (e instanceof CharConversionException) {
+            return ERROR_IO_CharConversionException;
+        } else if (e instanceof MalformedInputException) {
+            return ERROR_IO_CharacterCodingException_MalformedInputException;
+        } else if (e instanceof UnmappableCharacterException) {
+            return ERROR_IO_CharacterCodingException_UnmappableCharacterException;
+        } else if (e instanceof HttpResponseException) {
+            return ERROR_IO_ClientProtocolException_HttpResponseException;
+        } else if (e instanceof ClosedChannelException) {
+            return ERROR_IO_ClosedChannelException;
+        } else if (e instanceof ConnectionClosedException) {
+            return ERROR_IO_ConnectionClosedException;
+        } else if (e instanceof EOFException) {
+            return ERROR_IO_EOFException;
+        } else if (e instanceof FileLockInterruptionException) {
+            return ERROR_IO_FileLockInterruptionException;
+        } else if (e instanceof FileNotFoundException) {
+            return ERROR_IO_FileNotFoundException;
+        } else if (e instanceof HttpRetryException) {
+            return ERROR_IO_HttpRetryException;
+        } else if (e instanceof ConnectTimeoutException) {
+            return ERROR_IO_InterruptedIOException_ConnectTimeoutException;
+        } else if (e instanceof SocketTimeoutException) {
+            return ERROR_IO_InterruptedIOException_SocketTimeoutException;
+        } else if (e instanceof InvalidPropertiesFormatException) {
+            return ERROR_IO_InvalidPropertiesFormatException;
+        } else if (e instanceof MalformedChunkCodingException) {
+            return ERROR_IO_MalformedChunkCodingException;
+        } else if (e instanceof MalformedURLException) {
+            return ERROR_IO_MalformedURLException;
+        } else if (e instanceof NoHttpResponseException) {
+            return ERROR_IO_NoHttpResponseException;
+        } else if (e instanceof InvalidClassException) {
+            return ERROR_IO_ObjectStreamException_InvalidClassException;
+        } else if (e instanceof InvalidObjectException) {
+            return ERROR_IO_ObjectStreamException_InvalidObjectException;
+        } else if (e instanceof NotActiveException) {
+            return ERROR_IO_ObjectStreamException_NotActiveException;
+        } else if (e instanceof NotSerializableException) {
+            return ERROR_IO_ObjectStreamException_NotSerializableException;
+        } else if (e instanceof OptionalDataException) {
+            return ERROR_IO_ObjectStreamException_OptionalDataException;
+        } else if (e instanceof StreamCorruptedException) {
+            return ERROR_IO_ObjectStreamException_StreamCorruptedException;
+        } else if (e instanceof WriteAbortedException) {
+            return ERROR_IO_ObjectStreamException_WriteAbortedException;
+        } else if (e instanceof ProtocolException) {
+            return ERROR_IO_ProtocolException;
+        } else if (e instanceof SSLHandshakeException) {
+            return ERROR_IO_SSLException_SSLHandshakeException;
+        } else if (e instanceof SSLKeyException) {
+            return ERROR_IO_SSLException_SSLKeyException;
+        } else if (e instanceof SSLPeerUnverifiedException) {
+            return ERROR_IO_SSLException_SSLPeerUnverifiedException;
+        } else if (e instanceof SSLProtocolException) {
+            return ERROR_IO_SSLException_SSLProtocolException;
+        } else if (e instanceof BindException) {
+            return ERROR_IO_SocketException_BindException;
+        } else if (e instanceof ConnectException) {
+            return ERROR_IO_SocketException_ConnectException;
+        } else if (e instanceof NoRouteToHostException) {
+            return ERROR_IO_SocketException_NoRouteToHostException;
+        } else if (e instanceof PortUnreachableException) {
+            return ERROR_IO_SocketException_PortUnreachableException;
+        } else if (e instanceof SyncFailedException) {
+            return ERROR_IO_SyncFailedException;
+        } else if (e instanceof UTFDataFormatException) {
+            return ERROR_IO_UTFDataFormatException;
+        } else if (e instanceof UnknownHostException) {
+            return ERROR_IO_UnknownHostException;
+        } else if (e instanceof UnknownServiceException) {
+            return ERROR_IO_UnknownServiceException;
+        } else if (e instanceof UnsupportedEncodingException) {
+            return ERROR_IO_UnsupportedEncodingException;
+        } else if (e instanceof ZipException) {
+            return ERROR_IO_ZipException;
+        }
+        return Constants.ERROR_IO;
+    }
+
+    /**
+     *
+     */
+    public static Statistic openUrl2(Context ctx, String url, String method, Bundle paramsIN)
+            throws MalformedURLException, IOException, NetworkUnavailableException,
+            HttpStatusException {
+
+        // add by todd 2013-1-9, 判断网络是否可用 -->>
+        if (ctx != null) {
+            ConnectivityManager cnMgr = (ConnectivityManager) ctx
+                    .getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cnMgr != null) {
+                NetworkInfo info = cnMgr.getActiveNetworkInfo();
+                if (info == null || !info.isAvailable()) {
+                    // 网络不可用，抛出异常
+                    throw new NetworkUnavailableException(NetworkUnavailableException.ERROR_INFO);
+                }
+            }
+        }
+        Bundle params = null;
+        if(paramsIN != null){
+        	params = new Bundle(paramsIN);
+        }else {
+        	params = new Bundle();
+        }
+        String result = "";
+        String appidString = params.getString("appid_for_getting_config");
+        params.remove("appid_for_getting_config");
+        HttpClient client = getHttpClient(ctx, appidString, url);
+        HttpUriRequest request = null;
+        int reqSize = 0;
+        if (method.equals("GET")) {
+            String encodedParam = encodeUrl(params);
+            reqSize += encodedParam.length();
+            SLog.v(TAG, "-->openUrl2 before url =" + url);
+            if (url.indexOf("?") == -1) {
+                url = url + "?";
+            } else {
+                url = url + "&";
+            }
+            SLog.v(TAG, "-->openUrl2 encodedParam =" + encodedParam + " -- url = " + url);
+            url = url + encodedParam;
+            request = new HttpGet(url);
+            request.addHeader("Accept-Encoding", "gzip");
+        } else if (method.equals("POST")) {
+            HttpPost post = new HttpPost(url);
+            post.addHeader("Accept-Encoding", "gzip");
+            Bundle dataparams = new Bundle();
+            for (String key : params.keySet()) {
+                Object parameter = params.get(key);
+                if (parameter instanceof byte[]) {
+                    dataparams.putByteArray(key, (byte[]) parameter);
+                }
+            }
+            // use method override
+            if (!params.containsKey("method")) {
+                params.putString("method", method);
+            }
+            post.setHeader("Content-Type", "multipart/form-data; boundary="
+                    + BOUNDRY);
+            post.setHeader("Connection", "Keep-Alive");
+            ByteArrayOutputStream os = new ByteArrayOutputStream();
+
+            os.write(Util.getBytesUTF8("--" + BOUNDRY + ENDLINE));
+            os.write(Util.getBytesUTF8(encodePostBody(params, BOUNDRY)));
+            // 1. 这里多了一行, 会导致common-upload 会无法接收到上传的文件
+            // 且 encodePostBody 已经会在每个参数后面输出一行 BOUNDRY, 这里就没必要再输出个了
+            // os.write((ENDLINE + "--" + BOUNDRY + ENDLINE).getBytes());
+
+            if (!dataparams.isEmpty()) {
+                int dataparamSize = dataparams.size();
+                int dataparamHandleCount = -1;
+                os.write(Util.getBytesUTF8(ENDLINE + "--" + BOUNDRY + ENDLINE));
+                for (String key : dataparams.keySet()) {
+                    dataparamHandleCount++;
+                    // 2. 如果不传 name 字段, 同样会导致 common-upload 无法接收文件
+                    os.write(Util.getBytesUTF8("Content-Disposition: form-data; name=\""
+                            + key + "\"; filename=\""
+                            + key + "\"" + ENDLINE));
+                    os.write(Util.getBytesUTF8("Content-Type: content/unknown" + ENDLINE + ENDLINE));
+                    byte[] data = dataparams.getByteArray(key);
+                    if (data != null) {
+                    	os.write(data);
+                    }
+                    if (dataparamHandleCount < dataparamSize - 1) {
+                        os.write(Util.getBytesUTF8(ENDLINE + "--" + BOUNDRY + ENDLINE));
+                    }
+
+                }
+            }
+            // 3. 最后一个 boundry 要有个 "--" 来标志结束, 否则导致 common-upload 无法接收文件
+            os.write(Util.getBytesUTF8(ENDLINE + "--" + BOUNDRY + "--" + ENDLINE));
+
+            byte[] data = os.toByteArray();
+            reqSize += data.length;
+            os.close();
+            ByteArrayEntity formEntity = new ByteArrayEntity(data);
+            post.setEntity(formEntity);
+            request = post;
+        }
+
+        HttpResponse response = client.execute(request);
+        StatusLine status = response.getStatusLine();
+        int statusCode = status.getStatusCode();
+
+        if (statusCode == 200) {
+            result = readHttpResponse(response);
+        } else {
+            // 将具体的http返回码进行上报
+            throw new HttpStatusException(HttpStatusException.ERROR_INFO + statusCode);
+        }
+
+        return new Statistic(result, reqSize);
+    }
+
+    /**
+     * 读取HttpResponse数据
+     *
+     * @param response
+     * @return
+     * @throws IOException
+     * @throws IllegalStateException
+     */
+    private static String readHttpResponse(HttpResponse response)
+            throws IllegalStateException, IOException {
+        String result = "";
+        HttpEntity entity = response.getEntity();
+        InputStream inputStream;
+        inputStream = entity.getContent();
+        ByteArrayOutputStream content = new ByteArrayOutputStream();
+
+        Header header = response.getFirstHeader("Content-Encoding");
+        if (header != null
+                && header.getValue().toLowerCase().indexOf("gzip") > -1) {
+            inputStream = new GZIPInputStream(inputStream);
+        }
+
+        int readBytes = 0;
+        byte[] sBuffer = new byte[512];
+        while ((readBytes = inputStream.read(sBuffer)) != -1) {
+            content.write(sBuffer, 0, readBytes);
+        }
+        result = new String(content.toByteArray(), "UTF-8");
+        inputStream.close();
+        return result;
+    }
+
+    public static HttpClient getHttpClient(Context ctx, String appId, String urltmp) { // TODO:测试日志删除后,urltmp参数删除
+        SchemeRegistry schemeRegistry = new SchemeRegistry();
+        schemeRegistry.register(new Scheme("http", PlainSocketFactory.getSocketFactory(), 80));
+        /**
+         * 为了解决某些2.2的机器ssl的问题
+         * http://stackoverflow.com/questions/2642777/trusting-all-certificates-using-httpclient-over-https
+         *
+         * 改成JELLY_BEAN是因为
+         * http://tapd.oa.com/v3/10066461/bugtrace/bugs/view?bug_id=1010066461048919896
+         * Build.VERSION_CODES.JELLY_BEAN = 16
+         */
+        if (Build.VERSION.SDK_INT < 16) {
+            KeyStore trustStore;
+            try {
+                trustStore = KeyStore.getInstance(KeyStore.getDefaultType());
+                trustStore.load(null, null);
+                SSLSocketFactory sf = new CustomSSLSocketFactory(trustStore);
+                sf.setHostnameVerifier(SSLSocketFactory.STRICT_HOSTNAME_VERIFIER);
+
+                schemeRegistry.register(new Scheme("https", sf, 443));
+            } catch (Exception e) {
+                schemeRegistry.register(new Scheme("https", SSLSocketFactory
+                        .getSocketFactory(), 443));
+            }
+        } else {
+            schemeRegistry.register(new Scheme("https", SSLSocketFactory
+                    .getSocketFactory(), 443));
+        }
+
+        HttpParams params = new BasicHttpParams();
+
+        OpenConfig config = null;
+        if (ctx != null) {
+        	config = OpenConfig.getInstance(ctx, appId);
+        }
+        int httpconTimeout = 0;
+        int socketTimeout = 0;
+        if (config != null) {
+        	httpconTimeout = config.getInt("Common_HttpConnectionTimeout");
+        	socketTimeout = config.getInt("Common_SocketConnectionTimeout");
+        }
+        // 拉取配置中心下发的配置，若取值为0则用默认值 -->>
+        httpconTimeout = httpconTimeout == 0 ? SET_CONNECTION_TIMEOUT : httpconTimeout;
+        socketTimeout = socketTimeout == 0 ? SET_SOCKET_TIMEOUT : socketTimeout;
+
+        HttpConnectionParams.setConnectionTimeout(params, httpconTimeout);
+        HttpConnectionParams.setSoTimeout(params, socketTimeout);
+        // 设置配置完毕 <<--
+
+        HttpProtocolParams.setVersion(params, HttpVersion.HTTP_1_1);
+        HttpProtocolParams.setContentCharset(params, HTTP.UTF_8);
+
+        String userAgentString = "AndroidSDK_" + android.os.Build.VERSION.SDK
+                + "_" + android.os.Build.DEVICE + "_"
+                + android.os.Build.VERSION.RELEASE;
+        HttpProtocolParams.setUserAgent(params, userAgentString);
+
+        ClientConnectionManager ccm = new ThreadSafeClientConnManager(params,
+                schemeRegistry);
+        HttpClient client = new DefaultHttpClient(ccm, params);
+
+        // 根据是否wap网络，决定是否设置proxy代理
+        NetworkProxy networkProxy = getProxy(ctx);
+        if (networkProxy != null) {
+            HttpHost proxy = new HttpHost(networkProxy.host, networkProxy.port);
+            client.getParams().setParameter(ConnRoutePNames.DEFAULT_PROXY, proxy);
+        }
+
+        return client;
+    }
+
+    public static String encodeUrl(Bundle parameters) {
+        if (parameters == null) {
+            return "";
+        }
+
+        StringBuilder sb = new StringBuilder();
+        boolean first = true;
+        for (String key : parameters.keySet()) {
+            Object parameter = parameters.get(key);
+            if (!(parameter instanceof String)
+                    && !(parameter instanceof String[])) {
+                continue;
+            }
+            if (parameter instanceof String[]) {
+                if (first) {
+                    first = false;
+                } else {
+                    sb.append("&");
+                }
+                sb.append(URLEncoder.encode(key) + "=");
+                String[] stArray = parameters.getStringArray(key);
+                if (stArray == null) {
+                    continue;
+                }
+                for (int index = 0; index < stArray.length; index++) {
+                    if (index == 0) {
+                        sb.append(URLEncoder.encode(stArray[index]));
+                    } else {
+                        sb.append(URLEncoder.encode("," + stArray[index]));
+                    }
+                }
+            } else {
+                if (first) {
+                    first = false;
+                } else {
+                    sb.append("&");
+                }
+                sb.append(URLEncoder.encode(key) + "="
+                        + URLEncoder.encode(parameters.getString(key)));
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Generate the multi-part post body providing the parameters and boundary
+     * string
+     *
+     * @param parameters the parameters need to be posted
+     * @param boundary the random string as boundary
+     * @return a string of the post body
+     */
+    public static String encodePostBody(Bundle parameters, String boundary) {
+        if (parameters == null) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        int dataparamHandleCount = -1;
+        int dataparamSize = parameters.size();
+        for (String key : parameters.keySet()) {
+            dataparamHandleCount++;
+            Object parameter = parameters.get(key);
+            if (!(parameter instanceof String)) {
+                continue;
+            }
+
+            sb.append("Content-Disposition: form-data; name=\"" + key
+                    + "\"" + ENDLINE + ENDLINE + (String) parameter);
+            if (dataparamHandleCount < dataparamSize - 1) {
+                sb.append(ENDLINE + "--" + boundary + ENDLINE);
+            }
+
+        }
+
+        return sb.toString();
+    }
+
+    public static NetworkProxy getProxy(Context context) {
+        if (context == null) {
+            return null;
+        }
+        ConnectivityManager connMgr = (ConnectivityManager) context
+                .getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (connMgr == null) {
+            return null;
+        }
+        NetworkInfo activeNetworkInfo = connMgr.getActiveNetworkInfo();
+        if (activeNetworkInfo == null) {
+            return null;
+        }
+
+        int type = activeNetworkInfo.getType();
+        if (type == ConnectivityManager.TYPE_MOBILE) {
+            String proxyHost = getProxyHost(context);
+            int proxyPort = getProxyPort(context);
+            if (!TextUtils.isEmpty(proxyHost) && proxyPort >= 0) {
+                return new NetworkProxy(proxyHost, proxyPort);
+            }
+        }
+        return null;
+    }
+
+    public static class NetworkProxy {
+
+        public final String host;
+        public final int port;
+
+        private NetworkProxy(String host, int port) {
+            this.host = host;
+            this.port = port;
+        }
+    }
+
+    private static int getProxyPort(Context ctx) {
+        int port = -1;
+        if (Build.VERSION.SDK_INT < 11) {
+            if (ctx != null) {
+                port = Proxy.getPort(ctx);
+                if (port < 0) {
+                    port = Proxy.getDefaultPort();
+                }
+            } else {
+                port = Proxy.getDefaultPort();
+            }
+        } else {
+            String portStr = System.getProperty("http.proxyPort");
+            if (!TextUtils.isEmpty(portStr)) {
+                try {
+                    port = Integer.parseInt(portStr);
+                } catch (NumberFormatException e) {
+                }
+            }
+        }
+        return port;
+    }
+
+    private static String getProxyHost(Context ctx) {
+        String host = null;
+        if (Build.VERSION.SDK_INT < 11) {
+            if (ctx != null) {
+                host = Proxy.getHost(ctx);
+                if (TextUtils.isEmpty(host)) {
+                    host = Proxy.getDefaultHost();
+                }
+            } else {
+                host = Proxy.getDefaultHost();
+            }
+
+        } else {
+            host = System.getProperty("http.proxyHost");
+        }
+        return host;
+    }
+
+    /**
+     * 同步访问TencentOpenApi的接口
+     *
+     * @param graphPath GraphApi中资源对象的路径（graph url中host之后参数之前的部分）
+     * @param params KV结构的参数
+     * @param httpMethod {@link Constants#HTTP_GET}或 {@link Constants#HTTP_POST}
+     * @return Tencent Graph API返回的json字符串
+     * @throws MalformedURLException
+     * @throws IOException
+     * @throws JSONException
+     * @throws HttpStatusException
+     * @throws NetworkUnavailableException
+     */
+    /*public static JSONObject upload(QQToken token, Context ctx, String graphPath, Bundle params)
+            throws IOException, JSONException, NetworkUnavailableException,
+            HttpStatusException {
+
+        //params = fillParams(ctx, token, graphPath, params);
+
+        String url = graphPath;
+        String reportUrlString = graphPath;
+        if (!graphPath.toLowerCase().startsWith("http")) {
+            // url = Constants.GRAPH_BASE + graphPath;
+            // reportUrlString = Constants.GRAPH_BASE + graphPath;
+            // modify by milesxia 2013-01-21
+            url = ServerSetting.getInstance().getEnvUrl(ctx, ServerSetting.DEFAULT_URL_GRAPH_BASE)
+                    + graphPath;
+            reportUrlString = ServerSetting.getInstance().getEnvUrl(ctx,
+                    ServerSetting.DEFAULT_URL_GRAPH_BASE)
+                    + graphPath;
+        }
+        reportStat(ctx, token, graphPath);
+        JSONObject obj = null;
+        long startTime = SystemClock.elapsedRealtime();
+        int resultCode = 0;
+        long reqsize = 0;
+        long rspsize = 0;
+
+        int iRetryTime = 0;
+        int requestRetryCount = OpenConfig.getInstance(ctx, token.getAppId()).getInt(
+                "Common_HttpRetryCount");
+        SLog.v("OpenConfig_test", "config 1:Common_HttpRetryCount            config_value:"
+                + requestRetryCount + "   appid:" + token.getAppId() + "     url:"
+                + reportUrlString);
+        requestRetryCount = requestRetryCount == 0 ? REQUEST_RETRY_TIME : requestRetryCount;
+        SLog.v("OpenConfig_test", "config 1:Common_HttpRetryCount            result_value:"
+                + requestRetryCount + "   appid:" + token.getAppId() + "     url:"
+                + reportUrlString);
+
+        do {
+            iRetryTime++;
+
+            try {
+                Statistic stat = Util.upload(ctx, url, params);
+
+                String response = stat.response;
+                obj = Util.parseJson(response);
+                try {
+                    resultCode = obj.getInt("ret");
+                } catch (JSONException e) {
+                    // @FIXME 此处需要新增一类异常对象， 请在后续版本fix。
+                    resultCode = Constants.ERROR_JSON;
+                }
+                reqsize = stat.reqSize;
+                rspsize = stat.rspSize;
+                break;
+
+            } catch (ConnectTimeoutException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_CONNECTTIMEOUT;
+                reqsize = 0;
+                rspsize = 0;
+                if (iRetryTime < requestRetryCount) {// 最后一次通过异常抛出去。
+                    startTime = SystemClock.elapsedRealtime();  //重置开始时间
+                    continue;
+                } else {
+                    ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                    throw e;
+                }
+            } catch (SocketTimeoutException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_SOCKETTIMEOUT;
+                reqsize = 0;
+                rspsize = 0;
+
+                if (iRetryTime < requestRetryCount) {// 最后一次通过异常抛出去。
+                    startTime = SystemClock.elapsedRealtime();  //重置开始时间
+                    continue;
+                } else {
+                    ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                    throw e;
+                }
+
+                // 以下4类异常不用重试， 直接返回失败。
+            } catch (HttpStatusException e) {
+                e.printStackTrace();
+                String statusCode = e.getMessage();
+                try {
+                    // 取得http返回的错误码
+                    statusCode = statusCode.replace("http status code error:",
+                            "");
+                    resultCode = Integer.parseInt(statusCode);
+                } catch (Exception e2) {
+                    e2.printStackTrace();
+                    // 获取错误码失败，则上报默认错误码-9,表示是http返回码错误
+                    resultCode = Constants.ERROR_HTTPSTATUS_ERROR;
+                }
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            } catch (NetworkUnavailableException e) {
+                e.printStackTrace();
+                throw e;
+            } catch (MalformedURLException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_URL;
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            } catch (IOException e) {
+                e.printStackTrace();
+                //resultCode = Constants.ERROR_IO; //－2错误码彻底细分
+                resultCode = getErrorCodeFromException(e);
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            } catch (JSONException e) {
+                e.printStackTrace();
+                resultCode = Constants.ERROR_JSON;
+                reqsize = 0;
+                rspsize = 0;
+                ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+                throw e;
+            }
+        } while (iRetryTime < requestRetryCount);
+        ReportManager.getInstance().reportCgi(reportUrlString, startTime, reqsize, rspsize, resultCode);
+        return obj;
+    }*/
+
+    public static class CustomSSLSocketFactory extends SSLSocketFactory {
+
+        private final SSLContext sslContext = SSLContext.getInstance("TLS");
+
+        public CustomSSLSocketFactory(KeyStore truststore)
+                throws NoSuchAlgorithmException, KeyManagementException,
+                KeyStoreException, UnrecoverableKeyException {
+
+            super(truststore);
+
+            TrustManager tm = null;
+            try {
+                tm = new MyX509TrustManager();
+            } catch (Exception e) {
+            }
+
+            sslContext.init(null, new TrustManager[] { tm }, null);
+
+        }
+
+        @Override
+        public Socket createSocket(Socket socket, String host, int port,
+                boolean autoClose) throws IOException, UnknownHostException {
+            return sslContext.getSocketFactory().createSocket(socket, host, port, autoClose);
+        }
+
+        @Override
+        public Socket createSocket() throws IOException {
+            return sslContext.getSocketFactory().createSocket();
+        }
+
+    }
+
+    public static class MyX509TrustManager implements X509TrustManager {
+        X509TrustManager sunJSSEX509TrustManager;
+        MyX509TrustManager() throws Exception {
+            // create a "default" JSSE X509TrustManager.
+            KeyStore ks = null;
+            try {
+                ks = KeyStore.getInstance("JKS");
+            } catch (Exception e){
+                // donothing
+            }
+            TrustManager tms [] = {};
+            if (ks != null){
+            	FileInputStream fis = null;
+            	try {
+            		fis = new FileInputStream("trustedCerts");
+            		ks.load(fis, "passphrase".toCharArray());
+            		TrustManagerFactory tmf = TrustManagerFactory.getInstance("SunX509", "SunJSSE");
+            		tmf.init(ks);
+            		tms = tmf.getTrustManagers();
+            	} finally {
+            		if (fis != null) {
+            			fis.close();
+            		}
+            		fis = null;
+            	}
+            }else{
+                TrustManagerFactory tmf = TrustManagerFactory
+                        .getInstance(TrustManagerFactory.getDefaultAlgorithm());
+                tmf.init((KeyStore) null);
+                tms =  tmf.getTrustManagers();
+
+            }
+            for (int i = 0; i < tms.length; i++) {
+                if (tms[i] instanceof X509TrustManager) {
+                    sunJSSEX509TrustManager = (X509TrustManager) tms[i];
+                    return;
+                }
+            }
+            throw new Exception("Couldn't initialize");
+        }
+
+        @Override
+        public void checkClientTrusted(X509Certificate[] chain, String authType)
+                throws CertificateException {
+            sunJSSEX509TrustManager.checkClientTrusted(chain, authType);
+        }
+
+        @Override
+        public void checkServerTrusted(X509Certificate[] chain, String authType)
+                throws CertificateException {
+            sunJSSEX509TrustManager.checkServerTrusted(chain, authType);
+        }
+
+        @Override
+        public X509Certificate[] getAcceptedIssuers() {
+            return sunJSSEX509TrustManager.getAcceptedIssuers();
+        }
+    }
+}

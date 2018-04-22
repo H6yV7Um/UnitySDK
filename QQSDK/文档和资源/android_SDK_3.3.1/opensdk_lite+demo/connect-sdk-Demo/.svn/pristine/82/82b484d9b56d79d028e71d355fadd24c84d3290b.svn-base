@@ -1,0 +1,299 @@
+package com.tencent.connect.common;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
+import android.text.TextUtils;
+import android.view.Window;
+
+import org.json.JSONObject;
+
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+
+public class AssistActivity extends Activity {	
+    private static final String RESTART_FLAG = "RESTART_FLAG";
+	private static final String RESUME_FLAG = "RESUME_FLAG";
+    private static final String TAG = SLog.TAG + ".AssistActivity";
+	
+	private boolean isRestart = false;
+	
+	public static final String EXTRA_INTENT = TAG + ".ExtraIntent";
+	
+	protected static final int FINISH_BY_TIMEOUT = 0;
+
+	protected  boolean mOnResumeIsInited = false;
+
+	private String mAppId;
+    
+	public static Intent getAssistActivityIntent(Context context) {
+		Intent intent = new Intent(context, AssistActivity.class);
+		return intent;
+	}
+	
+	protected Handler handler = new Handler() {
+
+		@Override
+		public void handleMessage(Message msg) {
+			switch(msg.what) {
+			case FINISH_BY_TIMEOUT:
+				if (!isFinishing()) {
+					SLog.w(TAG, "-->finish by timeout");
+					finish();
+				}
+				break;
+			}
+		}
+		
+	};
+
+	@Override
+	protected void onCreate(Bundle savedInstanceState) {
+		requestWindowFeature(Window.FEATURE_NO_TITLE);
+		super.onCreate(savedInstanceState);
+		setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_BEHIND);
+
+		SLog.d(TAG,"--onCreate--");
+		if (getIntent() == null) {
+			SLog.e(TAG, "-->onCreate--getIntent() returns null");
+			finish();
+		}
+		
+        Intent activityIntent =  getIntent().getParcelableExtra(EXTRA_INTENT);
+        int requestCode =  activityIntent == null ? 0 : activityIntent.getIntExtra(Constants.KEY_REQUEST_CODE, 0);
+		mAppId = activityIntent == null ? "" : activityIntent.getStringExtra(Constants.PARAM_APP_ID);//appId传过来,上报用
+		Bundle bundle = getIntent().getBundleExtra(SystemUtils.H5_SHARE_DATA);
+
+        if (savedInstanceState != null) {
+        	isRestart = savedInstanceState.getBoolean(RESTART_FLAG);
+			mOnResumeIsInited = savedInstanceState.getBoolean(RESUME_FLAG, false);
+        }
+        if (!isRestart) {
+        	if (bundle == null) { //拉起手Q
+        		//手Q在JumpActivity中会使用getCallingPackage获取第三方APP的包名，
+        		//getCallingPackage需要startActivityForResult调用方式
+        		if(activityIntent != null) {
+        			SLog.i(TAG, "--onCreate--activityIntent not null, will start activity, reqcode = " + requestCode);
+        			startActivityForResult(activityIntent, requestCode);
+        		} else {
+        			SLog.e(TAG, "--onCreate--activityIntent is null");
+        			//这里的情形有分享到AIO时，弹出分享成功对话框后，直接按home键回到桌面，再点击第三方app，AssistActivity会因超时finish；
+        			//然后再切回手Q，点击回到第三方app，会跑到这里，直接finish
+        			finish();
+        		}
+        	} else { //拉起H5
+        		SLog.w(TAG, "--onCreate--h5 bundle not null, will open browser");
+        		openBrowser(bundle);
+        	}      	     	
+        } else {
+        	//不处理
+        	SLog.d(TAG,"is restart");
+        }
+	}
+
+	@Override
+    protected void onStart() {
+        SLog.d(TAG, "-->onStart");
+        super.onStart();
+    }
+
+    @Override
+    protected void onResume() {
+        SLog.d(TAG, "-->onResume");
+        super.onResume();
+
+        /* 
+         * 涉及接口：分享到QQ/分享到空间/发送到我的电脑/发送到群部落
+         * 有些接口如果没有回调会导致走不到onNewIntent，AssistActivity无法finish，这里处理的逻辑如下： 
+         * （1）屏蔽掉登录这块，因为登录没有这个问题
+         * （2）正常情况下通过hackShareSend标记就可以保证返回时AssistActivity会被finish，但是手Q定向分享在AIO界面会异常拉起一次
+         *  AssistActivity导致该类提前被finish，所以这种场景单独在onActivityResult中通过判断requestCode来处理
+         */ 
+        Intent intent = getIntent();      
+        if (intent.getBooleanExtra(SystemUtils.IS_LOGIN, false)) {
+      	  return;
+        }
+        
+        if (!intent.getBooleanExtra(SystemUtils.IS_QQ_MOBILE_SHARE, false)) { //手Q定向分享的场景不在这里处理
+      	  if (isRestart && !isFinishing()) { 
+      		  finish();
+      	  }	      	
+        }
+		if (mOnResumeIsInited) {
+			Message msg = handler.obtainMessage(FINISH_BY_TIMEOUT);
+			//handler.sendMessageDelayed(msg, 1);
+			handler.sendMessage(msg);
+			return;
+		}
+		mOnResumeIsInited = true;
+
+    }
+
+    @Override
+    protected void onPause() {
+        SLog.d(TAG, "-->onPause");
+        handler.removeMessages(FINISH_BY_TIMEOUT);
+        super.onPause();
+    }
+
+    @Override
+    protected void onStop() {
+        SLog.d(TAG, "-->onStop");
+        super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        SLog.d(TAG, "-->onDestroy");
+        super.onDestroy();
+    }
+
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+    	SLog.i(TAG, "--onNewIntent");
+        super.onNewIntent(intent);
+        /*
+         * 通过伪协议方式回调的数据会走这里处理数据
+         */        
+        
+        intent.putExtra(Constants.KEY_ACTION, SystemUtils.ACTION_SHARE);
+        
+        setResult(Constants.ACTIVITY_OK, intent);            
+        
+        if (!isFinishing()) {
+        	SLog.i(TAG, "--onNewIntent--activity not finished, finish now");
+        	finish();
+        }    
+    }
+
+	@Override
+	protected void onSaveInstanceState(Bundle outState) {
+		SLog.d(TAG,"--onSaveInstanceState--");
+		outState.putBoolean(RESTART_FLAG, true);
+		outState.putBoolean(RESUME_FLAG, mOnResumeIsInited);
+		super.onSaveInstanceState(outState);
+	}
+
+	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		SLog.i(TAG, "--onActivityResult--requestCode: " + requestCode + " | resultCode: " + resultCode
+				+ "data = null ? " + (data == null));
+		super.onActivityResult(requestCode, resultCode, data);
+		if (requestCode == 0) { //非登录，登录的requestCode > 1000	
+			return;
+		}
+		
+		if (data != null) { 
+			data.putExtra(Constants.KEY_ACTION, SystemUtils.ACTION_LOGIN);
+		}
+				
+		setResultData(requestCode,data);
+
+		finish();
+	}
+    
+    public void setResultData(int requestCode, Intent intent){
+    	//手Q在授权界面直接点返回键返回的时候没有给intent,只给了resultCode=Activity.RESULT_CANCELED
+        if (intent == null) {
+        	SLog.w(TAG, "--setResultData--intent is null, setResult ACTIVITY_CANCEL");
+			setResult(Constants.ACTIVITY_CANCEL);
+			//登录回调上报,回调取消
+			if (requestCode == Constants.REQUEST_LOGIN) {
+				OpenSdkStatic.getInstance().reportVia("", mAppId, Constants.VIA_SSO_LOGIN,
+						Constants.VIA_REPORT_TYPE_SSO_LOGIN, Constants.VIA_ACT_TYPE_SEVEN, "2");
+			}
+			return;
+    	}
+        
+        try {
+            //如果是登录成功, 判断是否为登录, 如果是则setResult返回
+            String response = intent.getStringExtra(Constants.KEY_RESPONSE);
+            SLog.d(TAG,"--setResultDataForLogin-- " + response);
+            if(!TextUtils.isEmpty(response)) {
+                JSONObject jsonObject = new JSONObject(response);
+                String openid = jsonObject.optString("openid");
+                String access_token = jsonObject.optString("access_token");
+                //String pf = jsonObject.optString("pf");
+                //String pfkey = jsonObject.optString("pfkey");
+                if(!TextUtils.isEmpty(openid) && !TextUtils.isEmpty(access_token)) {
+                	SLog.i(TAG, "--setResultData--openid and token not empty, setResult ACTIVITY_OK");
+                    setResult(Constants.ACTIVITY_OK, intent);
+					//登录回调上报,成功 返回数据正常
+					OpenSdkStatic.getInstance().reportVia(openid, mAppId, Constants.VIA_SSO_LOGIN,
+							Constants.VIA_REPORT_TYPE_SSO_LOGIN, Constants.VIA_ACT_TYPE_SEVEN, "0");
+				} else {
+                	SLog.w(TAG, "--setResultData--openid or token is empty, setResult ACTIVITY_CANCEL");
+                    setResult(Constants.ACTIVITY_CANCEL, intent);
+					//登录回调上报,返回数据为空
+					OpenSdkStatic.getInstance().reportVia("", mAppId, Constants.VIA_SSO_LOGIN,
+							Constants.VIA_REPORT_TYPE_SSO_LOGIN, Constants.VIA_ACT_TYPE_SEVEN, "1");
+				}
+                //response带着关键信息，示例如下，其中外部应用根据openid及access_token去取该qq帐号基本信息:
+                // {"ret":0,
+                //  "pay_token":"F9819xxxxxxxxxxxxxx1",
+                //  "pf":"desktop_m_qq-10000144-android-2002-",
+                //  "expires_in":7776000,
+                //  "openid":"6E3332B8xxxxxxxxxxxxx1",
+                //  "pfkey":"9626xxxxxxxxxxxxxe",
+                //  "msg":"sucess",
+                //  "access_token":"7E549DAxxxxxxxxC"}
+            }else{
+            	SLog.w(TAG, "--setResultData--response is empty, setResult ACTIVITY_OK");
+            	// 非登录接口返回
+            	setResult(Constants.ACTIVITY_OK, intent);
+            }
+        } catch (Exception e) {
+        	SLog.e(TAG, "--setResultData--parse response failed");
+            e.printStackTrace();
+        }
+    }
+    
+    /*
+     * 拉起H5界面,分享到手Q，分享到手Q空间
+     * 在2.9版本已经去掉
+     */
+    private void openBrowser(Bundle bundle) {
+    	String viaShareType = bundle.getString("viaShareType");
+    	String action = bundle.getString("callbackAction");
+    	String url = bundle.getString("url");
+    	String openId = bundle.getString("openId");
+    	String appId = bundle.getString("appId");
+    	
+    	String via = "";
+    	String reportType = "";
+    	if (SystemUtils.QQ_SHARE_CALLBACK_ACTION.equals(action)) {
+    		via = Constants.VIA_SHARE_TO_QQ;
+    		reportType = Constants.VIA_REPORT_TYPE_SHARE_TO_QQ;
+    	} else if (SystemUtils.QZONE_SHARE_CALLBACK_ACTION.equals(action)) {
+    		via = Constants.VIA_SHARE_TO_QZONE;
+    		reportType = Constants.VIA_REPORT_TYPE_SHARE_TO_QZONE;
+    	}
+    	
+        boolean isOpenSuccess = Util.openBrowser(this, url);
+        if (!isOpenSuccess) {
+        	IUiListener listener = (IUiListener) UIListenerManager.getInstance().getListnerWithAction(action);
+            if (null != listener) {
+                listener.onError(new UiError(Constants.ERROR_UNKNOWN,
+                        Constants.MSG_OPEN_BROWSER_ERROR, null));
+            }
+            OpenSdkStatic.getInstance().reportVia(openId, appId, via,
+            		reportType, Constants.VIA_ACT_TYPE_THREE, Constants.VIA_RESULT_FAIL,
+                    viaShareType, Constants.VIA_NO_VALUE, Constants.VIA_CALL_SOURCE_H5, Constants.VIA_NO_VALUE);
+            finish();
+        } else {
+            OpenSdkStatic.getInstance().reportVia(openId, appId, via,
+            		reportType, Constants.VIA_ACT_TYPE_THREE, Constants.VIA_RESULT_SUCCESS,
+                    viaShareType, Constants.VIA_NO_VALUE, Constants.VIA_CALL_SOURCE_H5, Constants.VIA_NO_VALUE);
+        }
+        getIntent().removeExtra("shareH5");
+    }
+}

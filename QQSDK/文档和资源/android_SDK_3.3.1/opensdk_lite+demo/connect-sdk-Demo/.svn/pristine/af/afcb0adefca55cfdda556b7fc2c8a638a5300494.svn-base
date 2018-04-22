@@ -1,0 +1,122 @@
+package com.tencent.open.report;
+
+import android.os.Bundle;
+import android.os.SystemClock;
+
+import com.tencent.connect.common.Constants;
+import com.tencent.open.utils.Util;
+import com.tencent.open.report.ReportManager;
+
+/**
+ * 统计上报管理对外接口类，用于提供对外接口，数据在此处理后再调用真实的统计上报方法
+ *
+ * @author jieshao
+ * @date 2013-02-22
+ */
+public class OpenSdkStatic {
+	protected static OpenSdkStatic instance;
+
+	protected OpenSdkStatic() {
+	};
+
+	public synchronized static OpenSdkStatic getInstance() {
+		if (instance == null) {
+			instance = new OpenSdkStatic();
+		}
+		return instance;
+	}
+
+    /**
+     * 用于统计上报
+     *
+     * @param openId
+     * @param appId
+     * @param via
+     * @param action
+     * @param reportType
+     * @param actType
+     * @param result
+     */
+    public void reportVia(String openId, String appId, String via, String reportType, String actType, String result) {
+        Bundle params = Util.composeViaReportParams(openId, via, reportType, actType, appId, result);
+        ReportManager.getInstance().reportVia(params, appId, true);
+    }
+
+    /**
+     *
+     * @param openId
+     * @param appId
+     * @param via
+     * @param reportType
+     * @param actType
+     * @param result
+     * @param loginStatus
+     * @param needUserAuth
+     */
+    public void reportVia(String openId, String appId, String via, String reportType, String actType, String result,
+            String loginStatus, String needUserAuth) {
+        Bundle params = Util.composeViaReportParams(openId, reportType, actType, via, appId, result,
+                Constants.STR_EMPTY, loginStatus, needUserAuth, Constants.STR_EMPTY, Constants.STR_EMPTY,
+                Constants.STR_EMPTY);
+        ReportManager.getInstance().reportVia(params, appId, false);
+    }
+
+    /**
+     *
+     * @param openId
+     * @param appId
+     * @param via
+     * @param reportType
+     * @param actType
+     * @param result
+     * @param type
+     * @param toUin
+     * @param domain
+     * @param toType
+     */
+    public void reportVia(String openId, String appId, String via, String reportType, String actType, String result,
+            String type, String toUin, String call_source, String toType) {
+        Bundle params = Util.composeViaReportParams(openId, reportType, actType, via, appId, result, type,
+                Constants.STR_EMPTY, Constants.STR_EMPTY, toUin, call_source, toType);
+        ReportManager.getInstance().reportVia(params, appId, false);
+    }
+
+    /**
+     * 登陆，分享监控
+     * 
+     * @param result
+     *            0:成功, 1:失败
+     * @param cmd
+     *            监控命令字
+     * @param uin
+     * @param appid
+     *            应用程序ID
+     * @param shareType
+     *            分享类型 1: 好友: friends 2: 群: group 3: 讨论组: discuss 4: 空间: qzone
+     * @param startTime
+     *            开始时间
+     * @param code
+     *            请求返回码
+     * @param rate
+     *            采样率（100 意为 1/100的采样）
+     * @param detail
+     *            详细信息
+     */
+    public void reportHaboCgi(int result, String cmd, String uin, String appid, String shareType, Long startTime,
+            int code, int rate, String detail) {
+        long timeCost = SystemClock.elapsedRealtime() - startTime;
+        if (startTime == 0 || timeCost < 0) {
+            timeCost = 0;
+        }
+
+        StringBuffer url = new StringBuffer(ReportManager.URL_HABO_CGI);
+        // domain=mobile.opensdk.com&cgi=opensdk 后台根据这两个字段来判断是开平这边的监控业务
+        url.append("?domain=mobile.opensdk.com&cgi=opensdk&type=").append(result).append("&code=").append(code)
+                .append("&time=").append(timeCost).append("&rate=").append(rate).append("&uin=").append(uin)
+                .append("&data=");
+
+        Bundle params = Util.composeHaboCgiReportParams(String.valueOf(result), String.valueOf(code),
+                String.valueOf(timeCost), String.valueOf(rate), cmd, uin, appid, shareType, detail);
+        ReportManager.getInstance().httpRequest(url.toString(), "GET", params, true);
+    }
+}

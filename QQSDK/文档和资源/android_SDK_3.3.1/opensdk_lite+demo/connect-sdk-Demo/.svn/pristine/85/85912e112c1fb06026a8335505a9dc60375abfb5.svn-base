@@ -1,0 +1,264 @@
+package com.tencent.open;
+
+import java.io.UnsupportedEncodingException;
+import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+
+import android.net.Uri;
+import android.webkit.WebView;
+
+import com.tencent.open.log.SLog;
+
+public class JsBridge {
+
+	private static final String TAG = SLog.TAG + ".JsBridge";
+
+	public static class JsBridgeListener {
+		protected WeakReference<WebView> webViewRef;
+		protected long sn;
+		protected String url;
+
+		/**
+		 * 
+		 * @param wv
+		 *            所使用的webview
+		 * @param sn
+		 *            当前调用的sn序列号
+		 * @param url
+		 *            当前回调的url
+		 */
+		public JsBridgeListener(WebView wv, long sn, String url) {
+			webViewRef = new WeakReference<WebView>(wv);
+			this.sn = sn;
+			this.url = url;
+		}
+
+		/**
+		 * 
+		 * @param result
+		 * 
+		 * 正常返回时使用
+		 */
+        public void onComplete(Object result){
+            WebView webView = webViewRef.get();
+            if(webView == null){
+                return;
+            }
+            String arg = "'undefined'";
+            if(result instanceof String){
+                result = ((String) result).replace("\\", "\\\\").replace("'", "\\'");
+                arg = "'"+result+"'";
+            }else if(result instanceof Number ||
+                    result instanceof Long ||
+                    result instanceof Integer ||
+                    result instanceof Double ||
+                    result instanceof Float){
+                arg = result.toString();
+            }else if(result instanceof Boolean){
+                arg = result.toString();
+            }
+            webView.loadUrl("javascript:window.JsBridge&&JsBridge.callback("+sn+",{'r':0,'result':"+arg+"});");
+        }
+        public void onNoMatchMethod(){
+            WebView webView = webViewRef.get();
+            if(webView == null){
+                return;
+            }
+            webView.loadUrl("javascript:window.JsBridge&&JsBridge.callback("+sn+",{'r':1,'result':'no such method'})");
+        }
+        public void onPermissionDenied() {
+            WebView webView = webViewRef.get();
+            if (webView != null) {
+                webView.loadUrl("javascript:window.JsBridge&&JsBridge.callback("+sn+",{'r':2,'result':'Permission denied'})");
+            }
+        }
+        public void onCustomCallback(String js){
+            WebView wv = webViewRef.get();
+            if(wv != null){
+                wv.loadUrl("javascript:"+js);
+            }
+        }
+    }
+    public static class JsHandler{
+        /**
+         * 如需要自己处理
+         * @param methodName
+         * @param args
+         * @param listener
+         */
+        public void call( String methodName, List<String> args,JsBridgeListener listener){
+            Method[] methods = this.getClass().getDeclaredMethods();
+            Method targetMethod = null;
+            for(Method method : methods){
+                if(method.getName().equals(methodName)){
+                    Class[] types = method.getParameterTypes();
+                    if(types.length == args.size()){//暂时只判断长度
+                        targetMethod = method;
+                        break;
+                    }
+                }
+            }
+
+
+			if (targetMethod != null) {
+				Object result = null;
+				try {
+					// 好吧，这里实在是太恶心了，只支持最多6个参数，需要支持更多的函数时，请添加...
+					switch (args.size()) {
+					case 0:
+						result = targetMethod.invoke(this);
+						break;
+					case 1:
+						result = targetMethod.invoke(this, args.get(0));
+						break;
+					case 2:
+						result = targetMethod.invoke(this, args.get(0), args.get(1));
+						break;
+					case 3:
+						result = targetMethod.invoke(this, args.get(0), args.get(1), args.get(2));
+						break;
+					case 4:
+						result = targetMethod.invoke(this, args.get(0), args.get(1), args.get(2), args.get(3));
+						break;
+					case 5:
+						result = targetMethod.invoke(this, args.get(0), args.get(1), args.get(2), args.get(3), args.get(4));
+						break;
+					case 6:
+					default:
+						result = targetMethod.invoke(this, args.get(0), args.get(1), args.get(2), args.get(3), args.get(4), args.get(5));
+						break;
+					}
+					Class<?> returnType = targetMethod.getReturnType();
+					SLog.d(TAG, "-->call, result: " + result + " | ReturnType: " + returnType.getName());
+					if ("void".equals(returnType.getName()) || returnType == Void.class) {
+						if (listener != null) {
+							listener.onComplete(null);
+						}
+					} else {
+						if (listener != null) {
+							if (customCallback()) {// 自定义callback，即返回的是需执行的js脚本
+								listener.onCustomCallback(result != null ? result.toString() : null);
+							} else {// 非自定义callback,返回值为参数
+									// listener.onComplete(result); 不需要回调
+							}
+						}
+					}
+					return;
+				} catch (Exception e) {// catch 捕获所有exception
+					SLog.e(TAG, "-->handler call mehtod ex. targetMethod: " + targetMethod, e);
+					if (listener != null)
+						listener.onNoMatchMethod();
+					return;
+				}
+
+			}
+			if (listener != null)
+				listener.onNoMatchMethod();
+		}
+
+		/**
+		 * 需要自定义callback，修改此函数返回值，并在具体接口里返回回调的js串，满足需在回调js时有多个参数或有number/string/
+		 * int之外参数的情况
+		 * 
+		 * @return
+		 */
+		public boolean customCallback() {
+			return false;
+		}
+	}
+
+	protected HashMap<String, JsHandler> jsHandlers;
+
+	public JsBridge() {
+		jsHandlers = new HashMap<String, JsHandler>();
+	}
+
+	public void registerHandler(JsHandler jsHandler, String objName) {
+		jsHandlers.put(objName, jsHandler);
+	}
+
+	/**
+	 * 删除注册的handler, objectName为null表示删除所有handler(为减少方法数，这里不加clearAllHandler了)
+	 * 
+	 * @param objectName
+	 */
+	public void unregisterHandler(String objectName) {
+		if (objectName == null) {
+			jsHandlers.clear();
+		} else {
+			jsHandlers.remove(objectName);
+		}
+	}
+
+	public void getResult(String objName, String methodName, List<String> args,
+			final JsBridgeListener listener) {
+		SLog.v(TAG, "getResult---objName = " + objName + " methodName = "
+				+ methodName);
+		// decode url
+		for (int i = 0, l = args.size(); i < l; i++) {
+			try {
+				args.set(i, java.net.URLDecoder.decode(args.get(i), "UTF-8"));
+			} catch (UnsupportedEncodingException e) {
+				e.printStackTrace();
+			}
+		}
+		JsHandler handler = jsHandlers.get(objName);
+		if (handler != null) {
+			// 存在对应的handler，由handler处理
+			SLog.d(TAG, "call----");
+			handler.call(methodName, args, listener);
+		} else {
+			SLog.d(TAG, "not call----objName NOT FIND");
+			// 未找到handler ，回调告知无此API
+			if (listener != null) {
+				listener.onNoMatchMethod();
+			}
+		}
+	}
+
+	public boolean canHandleUrl(WebView webView, String url) {
+		SLog.v(TAG, "-->canHandleUrl---url = " + url);
+        if(url == null){
+            return false;
+        }
+        final Uri uri = Uri.parse(url);
+        if (!uri.getScheme().equals("jsbridge")) {
+            return false;
+        }
+
+        String[] paths = (url+"/#").split("/");
+        ArrayList<String> pathArrayList = new ArrayList<String>(Arrays.asList(paths));
+        if(pathArrayList.size() < 6){
+            return false;
+        }
+        // jsbridge://objname/method/arg0/arg1/arg2  移除到只剩method及后续的arg
+        String objectName = pathArrayList.get(2);
+        String methodName = pathArrayList.get(3);
+        //暂时去掉
+//        String snStr = pathArrayList.get(4);
+//        long sn;
+//        try{
+//            sn = Long.parseLong(snStr);
+//        }catch (Exception e){
+//            // do nothing
+//            return false;
+//        }
+        long sn = 4;
+        //暂时修改
+        final List<String> args = pathArrayList.subList(/*5*/4, pathArrayList.size()-1);
+
+
+        JsBridgeListener listener = new JsBridgeListener(webView, sn, url);
+        String currentUrl = webView.getUrl();
+        if (/*AuthorizeConfig.getInstance().hasCommandRight(currentUrl, objectName + "." + methodName)*/true) {
+            getResult(objectName, methodName, args, listener);
+        } else {
+            listener.onPermissionDenied();
+        }
+        return true;
+    }
+}

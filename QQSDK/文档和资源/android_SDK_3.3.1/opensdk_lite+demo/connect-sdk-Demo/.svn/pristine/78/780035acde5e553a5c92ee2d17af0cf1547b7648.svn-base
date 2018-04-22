@@ -1,0 +1,321 @@
+
+package com.tencent.connect.avatar;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.Matrix;
+import android.graphics.PointF;
+import android.graphics.Rect;
+import android.util.AttributeSet;
+import android.view.MotionEvent;
+import android.view.animation.Animation;
+import android.view.animation.ScaleAnimation;
+import android.view.animation.TranslateAnimation;
+import android.widget.ImageView;
+
+//支持触摸的imageview
+public class TouchView extends ImageView
+{
+    static final int NONE = 0;// 表示当前没有状态
+    static final int DRAG = 1; // 表示当前处于移动状态
+    static final int ZOOM = 2; // 表示当前处于缩放状态
+    static final int BIGGER = 3; // 表示放大图片
+    static final int SMALLER = 4; // 表示缩小图片
+
+    private Matrix matrix = new Matrix();
+    private Matrix savedMatrix = new Matrix();
+    private int mode = NONE;
+    private float maxScale = 1;
+    private float minScale = 1;
+    private Bitmap inputBitmap;
+    private boolean animing = false;
+    private float startX, startY;
+    final String TAG = "TouchView";
+
+    private PointF start = new PointF();
+    private PointF mid = new PointF();
+    private float oldDist = 1f;
+    private float translateScale = 0;
+
+    public boolean isMoveOrZoom = false;
+
+    private Rect clipRect = new Rect();
+
+    /**
+     * 默认构造函数
+     * 
+     * @param context
+     */
+    public TouchView(Context context) {
+        super(context);
+        getDrawingRect(clipRect);
+        init();
+    }
+
+    /**
+     * 该构造方法在静态引入XML文件中是必须的
+     * 
+     * @param context
+     * @param paramAttributeSet
+     */
+    public TouchView(Context context, AttributeSet paramAttributeSet) {
+        super(context, paramAttributeSet);
+        getDrawingRect(clipRect);
+        init();
+    }
+
+    /**
+     * 默认构造函数
+     * 
+     * @param context
+     */
+    public TouchView(Context context, Rect rect) {
+        super(context);
+        clipRect = rect;
+        init();
+    }
+
+    @Override
+    public void setImageBitmap(Bitmap bm) {
+        super.setImageBitmap(bm);
+        inputBitmap = bm;
+        if (bm != null) {
+            inputBitmap = bm;
+        }
+    }
+
+    // 用来计算2个触摸点的距离
+    private float spacing(MotionEvent event) {
+        if (event.getPointerCount() < 2) {
+            return 0;
+        }
+        float x = event.getX(0) - event.getX(1);
+        float y = event.getY(0) - event.getY(1);
+        return (float) Math.sqrt(x * x + y * y);
+    }
+
+    private void init() {
+    }
+
+    public void setClipRect(Rect rect) {
+        clipRect = rect;
+        if (inputBitmap != null) {
+            initMatrix();
+        }
+    }
+
+    // 计算中心点
+    private void midPoint2(PointF point) {
+        if (inputBitmap == null) {
+            return;
+        }
+        float[] values = new float[9];
+        matrix.getValues(values);
+        float globalX = values[Matrix.MTRANS_X];
+        float globalY = values[Matrix.MTRANS_Y];
+        float scale = values[Matrix.MSCALE_X];
+        float width = inputBitmap.getWidth();
+        float height = inputBitmap.getHeight();
+        float scaleWidth = width * scale;
+        float scaleHeight = height * scale;
+        float w1 = clipRect.left - globalX;
+        if (w1 <= 1) {
+            w1 = 1;
+        }
+        float w2 = globalX + scaleWidth - clipRect.right;
+        if (w2 <= 1) {
+            w2 = 1;
+        }
+        float w3 = w1 + w2;
+        float t1 = clipRect.width() * w1 / w3;
+        float x = t1 + clipRect.left;
+        float h1 = clipRect.top - globalY;
+        float h2 = globalY + scaleHeight - clipRect.bottom;
+        if (h1 <= 1) {
+            h1 = 1;
+        }
+        if (h2 <= 1) {
+            h2 = 1;
+        }
+        float h3 = h1 + h2;
+        float k1 = clipRect.height() * h1 / h3;
+        float y = k1 + clipRect.top;
+        point.set(x, y);
+    }
+
+    @Override
+    public boolean onTouchEvent(MotionEvent event)
+    {
+        if (animing) {
+            return true;
+        }
+        switch (event.getAction() & MotionEvent.ACTION_MASK) {
+            case MotionEvent.ACTION_DOWN:
+
+                matrix.set(getImageMatrix());
+                savedMatrix.set(matrix);
+                start.set(event.getX(), event.getY());
+                mode = DRAG;
+
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                oldDist = spacing(event);
+                if (oldDist > 10f) {
+                    savedMatrix.set(matrix);
+                    midPoint2(mid);// , event);
+                    mode = ZOOM;
+                }
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_POINTER_UP:
+                // if(mode==ZOOM){
+                adjustMatrix();
+                // }
+                mode = NONE;
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (mode == DRAG) {
+                    matrix.set(savedMatrix);
+                    float translateX = event.getX() - start.x;
+                    float translateY = event.getY() - start.y;
+                    matrix.postTranslate(translateX, translateY);
+                    setImageMatrix(matrix);// adjustMatrix(DRAG);
+                } else if (mode == ZOOM) {
+                    matrix.set(matrix);
+                    float newDist = spacing(event);
+                    if (newDist > 10f) {
+                        matrix.set(savedMatrix);
+                        float scale = newDist / oldDist;
+                        matrix.postScale(scale, scale, mid.x, mid.y);
+                    }
+                    setImageMatrix(matrix);
+                }
+                break;
+        }
+        isMoveOrZoom = true;
+        return true;
+
+    }
+
+    private void adjustMatrix() {
+        if (inputBitmap == null) {
+            return;
+        }
+        float clipWidth = clipRect.width();// 方框宽度
+        float clipHeight = clipRect.height();// 方框高度
+
+        float[] values = new float[9];
+        matrix.getValues(values);
+        float globalX = values[Matrix.MTRANS_X];
+        float globalY = values[Matrix.MTRANS_Y];
+        float scale = values[Matrix.MSCALE_X];
+        Animation animation = null;
+        if (scale > maxScale) {
+            translateScale = maxScale / scale;
+            matrix.postScale(translateScale, translateScale, mid.x, mid.y);
+            setImageMatrix(matrix);
+            animation = new ScaleAnimation(1 / translateScale, 1, 1 / translateScale, 1, mid.x,
+                    mid.y);
+        }
+        else if (scale < minScale) {
+            translateScale = minScale / scale;
+            matrix.postScale(translateScale, translateScale, mid.x, mid.y);
+            animation = new ScaleAnimation(1, translateScale, 1, translateScale, mid.x, mid.y);
+        }
+        else {
+            boolean flag = false;
+            float scaleWidth = inputBitmap.getWidth() * scale;
+            float scaleHeight = inputBitmap.getHeight() * scale;
+            float left = clipRect.left - globalX;
+            float top = clipRect.top - globalY;
+            if (left < 0) {
+                globalX = clipRect.left;
+                flag = true;
+            }
+            if (top < 0) {
+                globalY = clipRect.top;
+                flag = true;
+            }
+            float width = scaleWidth - left;
+            float height = scaleHeight - top;
+
+            if (width < clipWidth) {
+                left = scaleWidth - clipWidth;
+                globalX = clipRect.left - left;
+                flag = true;
+            }
+            if (height < clipHeight) {
+                top = scaleHeight - clipHeight;
+                globalY = clipRect.top - top;
+                flag = true;
+            }
+            if (flag) {
+                float offsetX = values[Matrix.MTRANS_X] - globalX;
+                float offsetY = values[Matrix.MTRANS_Y] - globalY;
+                values[Matrix.MTRANS_X] = globalX;
+                values[Matrix.MTRANS_Y] = globalY;
+                matrix.setValues(values);
+                setImageMatrix(matrix);
+                animation = new TranslateAnimation(offsetX, 0, offsetY, 0);
+            }
+            else {
+                setImageMatrix(matrix);
+            }
+        }
+
+        if (animation != null) {
+            animing = true;
+            animation.setDuration(300);
+            startAnimation(animation);
+
+            new Thread(new Runnable() {
+                public void run() {
+                    try {
+                        Thread.sleep(300);
+                    } catch (InterruptedException e) {
+                        e.printStackTrace();
+                    }
+                    post(new Runnable() {
+                        public void run() {
+                            clearAnimation();
+                            // if(type==ZOOM){
+                            adjustMatrix();
+                            // }
+                        }
+                    });
+                    animing = false;
+                }
+            }).start();
+        }
+    }
+
+    private void initMatrix() {
+        if (inputBitmap == null) {
+            return;
+        }
+        float[] values = new float[9];
+        matrix.getValues(values);
+        float scale = Math.max(
+                (float) clipRect.width() / inputBitmap.getWidth(),
+                (float) clipRect.height() / inputBitmap.getHeight());
+        startX = clipRect.left
+                - (inputBitmap.getWidth() * scale - clipRect.width()) / 2;
+        startY = clipRect.top
+                - (inputBitmap.getHeight() * scale - clipRect.height()) / 2;
+        values[Matrix.MTRANS_X] = startX;
+        values[Matrix.MTRANS_Y] = startY;
+        values[Matrix.MSCALE_X] = values[Matrix.MSCALE_Y] = scale;
+        matrix.setValues(values);
+        maxScale = Math.min(
+                AvatarConstants.MAX_SOURCE_SIZE
+                        / (float) inputBitmap.getWidth(),
+                AvatarConstants.MAX_SOURCE_SIZE
+                        / (float) inputBitmap.getHeight());
+        minScale = scale;
+        if (maxScale < minScale) {
+            maxScale = minScale;
+        }
+        setImageMatrix(matrix);
+    }
+
+}

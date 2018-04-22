@@ -1,0 +1,472 @@
+package com.tencent.open.utils;
+
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.lang.reflect.Method;
+import java.util.List;
+
+import android.annotation.SuppressLint;
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.content.pm.ResolveInfo;
+import android.content.pm.Signature;
+import android.database.Cursor;
+import android.net.Uri;
+import android.os.Build;
+import android.provider.MediaStore.MediaColumns;
+import android.view.MotionEvent;
+import com.tencent.connect.common.Constants;
+import com.tencent.open.log.SLog;
+
+public class SystemUtils {
+    public static final String QQ_VERSION_NAME_4_2_0 = "4.2.0"; // zivon: 手Q4.2.0
+    public static final String QQ_VERSION_NAME_4_3_0 = "4.3.0"; // zivon: 手Q4.3.0
+    public static final String QQ_VERSION_NAME_4_5_0 = "4.5.0";
+    public static final String QQ_VERSION_NAME_4_6_0 = "4.6.0"; // zivon: 手Q4.6.0
+    public static final String QQ_VERSION_NAME_5_0_0 = "5.0.0"; // zany: 手Q5.0.0
+    public static final String QQ_VERSION_NAME_5_1_0 = "5.1.0"; // zany: 手Q5.1.0
+	public static final String QQ_VERSION_NAME_5_2_0 = "5.2.0"; // zany: 手Q5.2.0
+	public static final String QQ_VERSION_NAME_5_3_0 = "5.3.0"; // hamlin: 手Q5.3.0
+    public static final String QQ_VERSION_NAME_5_9_5 = "5.9.5"; //hongxing: 手Q5.9.5
+	
+    public static final String QQ_SHARE_CALLBACK_ACTION = "shareToQQ"; // zivon: 手Q回调的key, 不要修改这个值
+    public static final String QZONE_SHARE_CALLBACK_ACTION = "shareToQzone"; // zivon: 手Q回调的key, 不要修改这个值
+    public static final String QQFAVORITES_CALLBACK_ACTION = "addToQQFavorites"; // hamlin: 手Q回调的key
+    public static final String QQDATALINE_CALLBACK_ACTION = "sendToMyComputer"; // hamlin: 手Q回调的key
+    public static final String TROOPBAR_CALLBACK_ACTION = "shareToTroopBar"; // hamlin: 手Q回调的key
+    
+    
+    public static final String ACTION_LOGIN = "action_login";
+    public static final String ACTION_SHARE = "action_share";
+    public static final String IS_LOGIN = "is_login";
+    public static final String IS_QQ_MOBILE_SHARE = "is_qq_mobile_share";
+    public static final String H5_SHARE_DATA = "h5_share_data";
+    public static final String ACTION_REQUEST_API = "action_request"; // 暂定使用
+    
+    private static final String TAG = SLog.TAG + ".SystemUtils";
+
+	/**
+	 * @hide
+	 *
+	 * @param context
+	 *         Context
+	 * @param packageName
+	 * 			The full name (i.e. com.google.apps.contacts) of the desired package.
+	 * @return
+	 * 	        null if App not exist in device. or VersionName of the App.
+	 *
+	 */
+	public static String getAppVersionName(Context context, String packageName) {
+		PackageManager pm = context.getPackageManager();
+		PackageInfo pkgInfo;
+		try {
+			pkgInfo = pm.getPackageInfo(packageName, 0);
+			return pkgInfo.versionName;
+		} catch (NameNotFoundException e) {
+			return null;
+		}
+	}
+
+	/**
+	 *
+	 * @param version1
+	 * @param version2
+	 * @return
+	 *          positive integer  	version1 > version2
+	 *          0  							version1 == version2
+	 *          negative integer 	version1 < version2
+	 */
+	public static int compareVersion(String version1, String version2) {
+		if (version1 == null && version2 == null) {
+			return 0;
+		} else if (version1 != null && version2 == null) {
+			return 1;
+		} else if (version1 == null && version2 != null) {
+			return -1;
+		}
+
+        String versionArray1[] = version1.split("\\.");
+        String versionArray2[] = version2.split("\\.");
+        int i;
+        try {
+            for (i = 0; i < versionArray1.length && i < versionArray2.length; ++i) {
+                int ver1 = Integer.parseInt(versionArray1[i]);
+                int ver2 = Integer.parseInt(versionArray2[i]);
+                if (ver1 < ver2) {
+                    return -1;
+                } else if (ver1 > ver2) {
+                    return 1;
+                }
+            }
+            if (versionArray1.length > i) {
+                return 1;
+            } else if (versionArray2.length > i) {
+                return -1;
+            } else {
+                return 0;
+            }
+        } catch (NumberFormatException e) {
+            return version1.compareTo(version2);
+        }
+    }
+
+    /**
+     * Query the signature for the application that would be invoked by the
+     * given intent and verify that it matches the given application's signature.
+     *
+     * @param context
+     * @param packageName
+     * @return true if the app's signature matches the expected signature.
+     */
+    public static boolean isAppSignatureValid(Context context, String packageName, String signatureMd5) {
+        SLog.v(TAG, "OpenUi, validateAppSignatureForPackage");
+        PackageInfo packageInfo;
+        try {
+            packageInfo = context.getPackageManager().getPackageInfo(
+                    packageName, PackageManager.GET_SIGNATURES);
+        } catch (NameNotFoundException e) {
+            return false;
+        }
+
+        for (Signature signature : packageInfo.signatures) {
+            String sigMd5 = Util.encrypt(signature.toCharsString());
+            if (sigMd5.equals(signatureMd5)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * add by toddzhao 2013-04-22 获取用于验证合法app的加密字符串 md5(md5(sign_str), time,
+     * packageName)
+     *
+     * @param time 系统时间值，用于密钥
+     * @return
+     */
+    public static String getAppSignatureMD5(Context context, String time) {
+        SLog.v(TAG, "OpenUi, getSignValidString");
+        String result = "";
+        try {
+            String packageName = context.getPackageName();
+            PackageManager pm = context.getPackageManager();
+            PackageInfo info = pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES);
+            Signature[] signs = info.signatures;
+
+            java.security.MessageDigest alga = java.security.MessageDigest.getInstance("MD5");
+            alga.update(signs[0].toByteArray());
+            String sign = Util.toHexString(alga.digest());
+            alga.reset();
+
+            SLog.v(TAG, "-->sign: " + sign);
+
+            String content = packageName + "_" + sign + "_" + time + "";
+            alga.update(Util.getBytesUTF8(content));
+            result = Util.toHexString(alga.digest());
+            alga.reset();
+
+            SLog.v(TAG, "-->signEncryped: " + result);
+        } catch (Exception e) {
+            e.printStackTrace();
+            SLog.e(TAG, "OpenUi, getSignValidString error", e);
+        }
+
+        return result;
+    }
+
+    /**
+     * check if use startActivity(intent) can find target activity.
+     * @param context
+     * @param intent
+     * 			Intent for target activity
+     * @return
+     * 			true if target activity exist
+     * 			false if target activity not exist
+     */
+    public static boolean isActivityExist(Context context, Intent intent) {
+    	if (context == null || intent == null) {
+    		return false;
+    	}
+
+    	PackageManager pm = context.getPackageManager();
+    	List<ResolveInfo> activities = pm.queryIntentActivities(intent, 0);
+    	return (activities.size() != 0);
+    }
+
+	public static String getAppName(Context context) {
+		ApplicationInfo appInfo = context.getApplicationInfo();
+		return appInfo.loadLabel(context.getPackageManager()).toString();
+	}
+
+	/**
+	 * 判断手Q的版本号是否大于某个指定的版本
+	 * 如果安装的手Q大于给定的版本,返回正数; 等于,返回0; 小于或者未安装手Q,返回负数
+	 *
+	 * @param context
+	 * @param comparedVersion
+	 * @return
+	 */
+	public static int compareQQVersion(Context context, String comparedVersion) {
+		String mobileQQVersion = getAppVersionName(context, Constants.MOBILEQQ_PACKAGE_NAME);
+		return compareVersion(mobileQQVersion, comparedVersion);
+	}
+
+	/**
+	 * 判断TIM的版本号是否大于某个指定的版本
+	 * 如果安装的TIM大于给定的版本,返回正数; 等于,返回0; 小于或者未安装TIM,返回负数
+	 *
+	 * @param context
+	 * @param comparedVersion
+	 * @return
+	 */
+	public static int compareTimVersion(Context context, String comparedVersion) {
+		String mobileQQVersion = getAppVersionName(context, Constants.PACKAGE_TIM);
+		return compareVersion(mobileQQVersion, comparedVersion);
+	}
+
+	/**
+	 * 判断QIM的版本号是否大于某个指定的版本
+	 * 如果安装的QIM大于给定的版本,返回正数; 等于,返回0; 小于或者未安装QIM,返回负数
+	 *
+	 * @param context
+	 * @param comparedVersion
+	 * @return
+	 */
+	public static int compareQimVersion(Context context, String comparedVersion) {
+		String mobileQQVersion = getAppVersionName(context, Constants.PACKAGE_QIM);
+		return compareVersion(mobileQQVersion, comparedVersion);
+	}
+
+	/**
+     * QQ 4.1及以上支持SSO登陆
+     * @param context
+     * @return
+     */
+	@Deprecated //通过compareQQVersion判断版本是否在4.1及以上
+    public static boolean checkMobileQQ(Context context) {
+		PackageManager manager = context.getPackageManager();
+		PackageInfo info = null;
+		try {
+			info = manager.getPackageInfo(com.tencent.connect.common.Constants.MOBILEQQ_PACKAGE_NAME, 0);
+		} catch (NameNotFoundException e) {
+			SLog.e(TAG, "checkMobileQQ NameNotFoundException", e);
+			e.printStackTrace();
+		}
+		if (info != null) {
+			String version = info.versionName;
+			String[] arr;
+			try {
+				SLog.d("MobileQQ verson", version); // 4.0.1
+				arr = version.split("\\.");
+				int v = Integer.parseInt(arr[0]);
+				int v1 = Integer.parseInt(arr[1]);
+				if (v > 4 || (v == 4 && v1 >= 1)) {
+					return true;
+				} else {
+					return false;
+				}
+			} catch (Exception e) {
+				SLog.e(TAG, "checkMobileQQ Exception", e);
+				e.printStackTrace();
+			}
+
+			return false;
+		} else {
+			return false;
+		}
+	}
+
+	public static int getAndroidSDKVersion() {
+		return android.os.Build.VERSION.SDK_INT;
+	}
+
+	public static boolean isSupportMultiTouch() {
+		boolean condition1 = false;
+		boolean condition2 = false;
+		// Not checking for getX(int), getY(int) etc 'cause I'm lazy
+		Method methods[] = MotionEvent.class.getDeclaredMethods();
+		for (Method m : methods) {
+			if (m.getName().equals("getPointerCount")) {
+                condition1 = true;
+            }
+			if (m.getName().equals("getPointerId")) {
+                condition2 = true;
+            }
+		}
+		if (getAndroidSDKVersion() >= 7 || (condition1 && condition2)) {
+            return true; // 支持多点触摸
+        } else {
+            return false;
+        }
+	}
+	
+	/**
+	 * 从asset目录copy最新的so库到/data/data/pkgname/lib
+	 * @param libName so库的名字
+	 * @return
+	 */
+	@SuppressLint("SdCardPath")
+	public static boolean extractSecureLib(String fileName, String targetFileName, int libVersion) {
+		SLog.i(TAG, "-->extractSecureLib, libName: " + fileName);
+		Context context = Global.getContext();
+		if (context == null) {
+			SLog.i(TAG, "-->extractSecureLib, global context is null. ");
+			return false;
+		}
+		
+		SharedPreferences sharedPref = context.getSharedPreferences("secure_lib", 0);
+		
+		File oldFile = new File(context.getFilesDir(), targetFileName);
+		if (!oldFile.exists()) {
+			File parent = oldFile.getParentFile();
+            if (parent != null && parent.mkdirs()) {
+				try {
+					oldFile.createNewFile();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		} else {
+			int oldVersion = sharedPref.getInt("version", 0);
+			SLog.i(TAG, "-->extractSecureLib, libVersion: " + libVersion + " | oldVersion: " + oldVersion);
+			if (libVersion == oldVersion) {
+				return true;
+			}
+		}
+		
+		InputStream is = null;
+		OutputStream os = null;
+		try {
+			is = context.getAssets().open(fileName);
+			os = context.openFileOutput(targetFileName, Context.MODE_PRIVATE);
+			//os = new FileOutputStream(oldFile, false);
+			copy(is, os);
+			//最新的lib拷贝成功，重新设置版本号为最新
+			Editor editor = sharedPref.edit();
+			editor.putInt("version", libVersion);
+			editor.commit();
+			return true;
+		} catch (Exception e) {
+			SLog.e(TAG, "-->extractSecureLib, when copy lib execption.", e);
+		} finally {
+			if (is != null) {
+				try {
+					is.close();
+				} catch (IOException e) {
+					
+				}
+			}
+			if (os != null) {
+				try {
+					os.close();
+				} catch (IOException e) {
+					
+				}
+			}
+		}
+		return false;
+	}
+	
+	/**
+	 * 判断so库是否存在
+	 * @param libName so库的名字
+	 * @param libVersion so库的版本号
+	 * @return
+	 */
+	@SuppressLint("SdCardPath")
+	public static boolean isLibExtracted(String libName, int libVersion) {
+		Context context = Global.getContext();
+		if (context == null) {
+			SLog.i(TAG, "-->isSecureLibExtracted, global context is null. ");
+			return false;
+		}
+		
+		File existedLib = new File(context.getFilesDir(), libName);
+		
+		SharedPreferences sharedPref = context.getSharedPreferences("secure_lib", 0);
+		if (existedLib.exists()) {
+			int oldVersion = sharedPref.getInt("version", 0);
+			SLog.i(TAG, "-->extractSecureLib, libVersion: " + libVersion + " | oldVersion: " + oldVersion);
+			if (libVersion == oldVersion) {
+				return true;
+			}
+			
+			Editor editor = sharedPref.edit();
+			editor.putInt("version", libVersion);
+			editor.commit();
+		}
+		
+		return false;
+	}
+	
+	private static long copy(InputStream is, OutputStream os) throws IOException {
+		long size = 0;
+		int bytesRead = 0;
+		byte[] buffer = new byte[8192];
+		while((bytesRead = is.read(buffer, 0, buffer.length)) != -1) {
+			os.write(buffer, 0, bytesRead);
+			size += bytesRead;
+		}
+		
+		SLog.i(TAG, "-->copy, copyed size is: " + size);
+		return size;
+	}
+	
+	public static int getRequestCodeFromCallback(String action){		
+		if(QQ_SHARE_CALLBACK_ACTION.equals(action)){
+			return Constants.REQUEST_QQ_SHARE;
+		}else if(QZONE_SHARE_CALLBACK_ACTION.equals(action)){
+			return Constants.REQUEST_QZONE_SHARE;
+		}else if(QQFAVORITES_CALLBACK_ACTION.equals(action)){
+			return Constants.REQUEST_QQ_FAVORITES;
+		}else if(QQDATALINE_CALLBACK_ACTION.equals(action)){
+			return Constants.REQUEST_SEND_TO_MY_COMPUTER;
+		}else if(TROOPBAR_CALLBACK_ACTION.equals(action)){
+			return Constants.REQUEST_SHARE_TO_TROOP_BAR;
+		}else if(ACTION_LOGIN.equals(action)){
+			return Constants.REQUEST_LOGIN;
+		}else if(ACTION_REQUEST_API.equals(action)){
+			return Constants.REQUEST_API;
+		}else{
+			return -1;
+		}
+	}
+	
+	public static String getActionFromRequestcode(int requestCode){
+		if(requestCode == Constants.REQUEST_QQ_SHARE){
+			return QQ_SHARE_CALLBACK_ACTION;
+		}else if(requestCode == Constants.REQUEST_QZONE_SHARE){
+			return QZONE_SHARE_CALLBACK_ACTION;
+		}else if(requestCode == Constants.REQUEST_QQ_FAVORITES){
+			return QQFAVORITES_CALLBACK_ACTION;
+		}else if(requestCode == Constants.REQUEST_SEND_TO_MY_COMPUTER){
+			return QQDATALINE_CALLBACK_ACTION;
+		}else if(requestCode == Constants.REQUEST_SHARE_TO_TROOP_BAR){
+			return TROOPBAR_CALLBACK_ACTION;
+		}else if(requestCode == Constants.REQUEST_LOGIN){
+			return ACTION_LOGIN;
+		}else if(requestCode == Constants.REQUEST_API){
+			return ACTION_REQUEST_API;
+		}
+		return null;
+	}
+	
+	/*public static boolean isX86Architecture(){
+        String abi = Build.CPU_ABI;
+        if(abi != null &&  !"".equals(abi) && "x86".equalsIgnoreCase(abi)){
+//      if(abi != null &&  !"".equals(abi) && "armeabi-v7a".equalsIgnoreCase(abi)){
+            return true;
+        }
+        return false;
+    }*/
+}

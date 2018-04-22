@@ -1,0 +1,42 @@
+[
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\zoomin.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\anim\\zoomin.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\push_up_in.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\anim\\push_up_in.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\shake.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\anim\\shake.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\zoomin.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\anim\\zoomin.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\zoomout.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\anim\\zoomout.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\push_up_in.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\anim\\push_up_in.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\shake.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\anim\\shake.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\cycle_7.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\anim\\cycle_7.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\cycle_7.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\anim\\cycle_7.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\anim\\zoomout.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\anim\\zoomout.xml"
+    }
+]

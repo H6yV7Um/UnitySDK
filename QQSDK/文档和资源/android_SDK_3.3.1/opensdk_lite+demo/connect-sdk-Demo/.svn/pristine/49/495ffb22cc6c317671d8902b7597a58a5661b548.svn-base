@@ -1,0 +1,869 @@
+package com.tencent.tauth;
+
+import java.io.IOException;
+import java.util.List;
+
+import com.tencent.connect.share.QzonePublish;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.app.Activity;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.content.pm.PackageManager.NameNotFoundException;
+import android.net.Uri;
+import android.os.Bundle;
+import android.support.v4.app.Fragment;
+import android.text.TextUtils;
+import android.util.Base64;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.avatar.AvatarConstants;
+import com.tencent.connect.avatar.QQAvatar;
+import com.tencent.connect.common.Constants;
+import com.tencent.connect.common.UIListenerManager;
+import com.tencent.connect.share.QQShare;
+import com.tencent.connect.share.QzoneShare;
+import com.tencent.open.GameAppOperation;
+import com.tencent.open.LocationApi;
+import com.tencent.open.SocialApi;
+import com.tencent.open.TaskGuide;
+import com.tencent.open.log.SLog;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.OpenConfig;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.open.wpa.WPA;
+import com.tencent.open.yyb.AppbarAgent;
+
+public class Tencent {
+	private static final String TAG = SLog.TAG + ".Tencent";
+
+	public static final int REQUEST_LOGIN = 10001;
+	
+	private final QQAuth mQQAuth;
+
+	private static Tencent sInstance;
+
+	private Tencent(String appId, Context context) {
+		//Global.setContext(context.getApplicationContext());
+		mQQAuth = QQAuth.createInstance(appId, context);
+	}
+
+	public synchronized static Tencent createInstance(String appId, Context ctx) {
+		//提前设置一下，方便SLog获取包名信息
+		Global.setContext(ctx.getApplicationContext());
+        SLog.i(TAG, "createInstance()  -- start, appId = " + appId);
+	    if (sInstance == null) {
+	        sInstance = new Tencent(appId, ctx);
+	    } else {
+	        if (!appId.equals(sInstance.getAppId())) {
+	            sInstance.logout(ctx);
+	            sInstance = new Tencent(appId, ctx);
+	        }
+	    }
+
+        if (!checkManifestConfig(ctx, appId)) {
+			return null;
+		}
+
+		OpenConfig.getInstance(ctx, appId);
+		SLog.i(TAG, "createInstance()  -- end");
+        return sInstance;
+    }
+
+	/**
+	 * 检查第三方应用配置，主要检测AuthActivity，AssistActivity
+	 * @param ctx
+	 * @param appId
+	 * @return
+	 */
+	private static boolean checkManifestConfig(Context ctx, String appId) {
+		//检查com.tencent.tauth.AuthActivity
+		try {
+			ComponentName componentName = new ComponentName(
+					ctx.getPackageName(), "com.tencent.tauth.AuthActivity");
+			PackageManager packageManager = ctx.getPackageManager();
+			// 如果开发者没配置 com.tencent.tauth.AuthActivity , getActivityInfo 就会出异常
+			packageManager.getActivityInfo(componentName,
+					PackageManager.GET_META_DATA
+							& PackageManager.GET_INTENT_FILTERS);
+
+		} catch (NameNotFoundException e) {
+			String msg = "没有在AndroidManifest.xml中检测到com.tencent.tauth.AuthActivity,请加上com.tencent.tauth.AuthActivity,并配置<data android:scheme=\"tencent"
+					+ appId + "\" />,详细信息请查看官网文档.";
+			msg += "\n配置示例如下: \n<activity\n"
+					+ "     android:name=\"com.tencent.tauth.AuthActivity\"\n"
+					+ "     android:noHistory=\"true\"\n"
+					+ "     android:launchMode=\"singleTask\">\n"
+					+ "<intent-filter>\n"
+					+ "    <action android:name=\"android.intent.action.VIEW\" />\n"
+					+ "    <category android:name=\"android.intent.category.DEFAULT\" />\n"
+					+ "    <category android:name=\"android.intent.category.BROWSABLE\" />\n"
+					+ "    <data android:scheme=\"tencent" + appId + "\" />\n"
+					+ "</intent-filter>\n" + "</activity>";
+            SLog.e(TAG, "AndroidManifest.xml 没有检测到com.tencent.tauth.AuthActivity" + msg);
+			return false;
+		}
+
+		//检查com.tencent.connect.common.AssistActivity
+		try {
+			ComponentName componentName = new ComponentName(
+					ctx.getPackageName(), "com.tencent.connect.common.AssistActivity");
+			PackageManager packageManager = ctx.getPackageManager();
+			// 如果开发者没配置 com.tencent.connect.common.AssistActivity , getActivityInfo 就会出异常
+			packageManager.getActivityInfo(componentName,
+					PackageManager.GET_META_DATA
+							& PackageManager.GET_INTENT_FILTERS);
+
+		} catch (NameNotFoundException e) {
+			String msg = "没有在AndroidManifest.xml中检测到com.tencent.connect.common.AssistActivity,请加上com.tencent.connect.common.AssistActivity,详细信息请查看官网文档.";
+			msg += "\n配置示例如下: \n<activity\n"
+					+ "     android:name=\"com.tencent.connect.common.AssistActivity\"\n"
+					+ "     android:screenOrientation=\"behind\"\n"
+					+ "     android:theme=\"@android:style/Theme.Translucent.NoTitleBar\"\n"
+					+ "     android:configChanges=\"orientation|keyboardHidden\">\n"
+					+ "</activity>";
+            SLog.e(TAG, "AndroidManifest.xml 没有检测到com.tencent.connect.common.AssistActivity\n" + msg);
+			return false;
+		}
+		return true;
+	}
+
+    /**
+     * SSO模式登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_token,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装手机QQ时，SDK会优先启用手机QQ中的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动手机QQActivity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param activity
+     *            调用者Activity。
+     * @param scope
+     *            应用所需要的所有权限，由“,”分隔
+     * @param listener
+     *            回调接口
+     * @return int
+     *         UI_NONE = -1: 异常
+     *         UI_ACTIVITY = 1 : 使用Activity登陆
+     *         UI_DIALOG =2 : 使用H5登陆 或显示下载页面
+     */
+	public int login(Activity activity, String scope, IUiListener listener) {
+		SLog.i(TAG, "login() with activity, scope is " + scope);
+		return mQQAuth.login(activity, scope, listener);
+	}
+
+    /**
+     * SSO模式登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_token,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装手机QQ时，SDK会优先启用手机QQ中的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动手机QQActivity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param fragment
+     *            调用者fragment。
+     * @param scope
+     *            应用所需要的所有权限，由“,”分隔
+     * @param listener
+     *            回调接口
+     * @return int
+     *         UI_NONE = -1: 异常
+     *         UI_ACTIVITY = 1 : 使用Activity登陆
+     *         UI_DIALOG =2 : 使用H5登陆 或显示下载页面
+     */
+	public int login(Fragment fragment, String scope, IUiListener listener) {
+		SLog.i(TAG, "login() with fragment, scope is " + scope);
+        return mQQAuth.login(fragment, scope, listener, "");
+    }
+
+    /**
+     * Server-Side模式登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_code,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装了手机QQ时，SDK会启用手机QQ的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动腾讯Activity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param activity
+     *            调用者Activity。
+     * @param scope
+     *            应用所需要的所有权限，由“,”分隔
+     * @param listener
+     *            回调接口
+     * @return int
+     *         UI_NONE = -1: 异常
+     *         UI_ACTIVITY = 1 : 使用Activity登陆
+     *         UI_DIALOG =2 : 使用H5登陆 或显示下载页面
+     */
+    public int loginServerSide(Activity activity, String scope, IUiListener listener) {
+    	SLog.i(TAG, "loginServerSide() with activity, scope = " + scope + ",server_side");
+        // Server-Side模式: 在scope的基础上加上"server_side" 关键字，后台通过这个关键字来判断。
+        return mQQAuth.login(activity, scope + ",server_side", listener);
+    }
+
+    /**
+     * Server-Side模式登录<br>
+     * <br>
+     * 启动一个交互界面，完成用户登录和授权的交互流程，通过回调返回授权的access_code,expirs_in和openId。
+     * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+     * <br>
+     * 当安装了手机QQ时，SDK会启用手机QQ的特定Activity，通过此Activity完成登录和授权功能。 当没有找到此Activity时
+     * ，SDK会执行Oauth2.0的User-Agent流程，即显示一个包含WebView的对话框， 通过加载登录授权网页来完成登录和授权的交互流程。<br>
+     * <br>
+     * <b>注意，当启动腾讯Activity时，应用需要回调
+     * {@link Tencent#onActivityResult(int, int, Intent)}才能收到调用结果。</b>
+     *
+     * @param fragment
+     *            调用者Fragment。
+     * @param scope
+     *            应用所需要的所有权限，由“,”分隔
+     * @param listener
+     *            回调接口
+     * @return int
+     *         UI_NONE = -1: 异常
+     *         UI_ACTIVITY = 1 : 使用Activity登陆
+     *         UI_DIALOG =2 : 使用H5登陆或显示下载页面
+     */
+    public int loginServerSide(Fragment fragment, String scope, IUiListener listener) {
+    	SLog.i(TAG, "loginServerSide() with fragment, scope = " + scope + ",server_side");
+        // Server-Side模式: 在scope的基础上加上"server_side" 关键字，后台通过这个关键字来判断。
+        return mQQAuth.login(fragment, scope + ",server_side", listener, "");
+    }
+
+	 /**
+     * 此接口单独开给【Oem应用市场分渠道计费参数需求】
+     * 比login接口多了三个字段： 注册渠道 、安装渠道、业务ID。必填参数，如果为空可以传 null 或者""
+     * @param activity
+     * @param scope
+     * @param listener
+     * @param registerChannel
+     * @param installChannel
+     * @param businessId
+     * @return
+     */
+	public int loginWithOEM(Activity activity, String scope, IUiListener listener,
+            String registerChannel, String installChannel, String businessId){
+		SLog.i(TAG, "loginWithOEM() with activity, scope = " + scope);
+	    return mQQAuth.loginWithOEM(activity, scope, listener, registerChannel, installChannel, businessId);
+	}
+
+	public void logout(Context ctx) {
+		SLog.i(TAG, "logout()");
+		mQQAuth.getQQToken().setAccessToken(null, "0");
+		mQQAuth.getQQToken().setOpenId(null);
+	}
+
+	public int reAuth(Activity activity, String scope, IUiListener listener) {
+		SLog.i(TAG, "reAuth() with activity, scope = " + scope);
+		return mQQAuth.reAuth(activity, scope, listener);
+	}
+
+    /**
+     * 登录成功后，上报并统计DAU
+     *
+     */
+    public void reportDAU() {
+        mQQAuth.reportDAU();
+    }
+
+    /**
+     * 校验token
+     *
+     * @param listener
+     */
+    public void checkLogin(IUiListener listener) {
+    	SLog.i(TAG, "checkLogin()");
+    	mQQAuth.checkLogin(listener);
+    }
+
+	public int invite(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "invite()");
+        SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+        mSocialApi.invite(activity, params, listener);
+        return 0;
+    }
+
+    public int story(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "story()");
+        SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+        mSocialApi.story(activity, params, listener);
+        return 0;
+    }
+
+    public int gift(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "gift()");
+        SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+        mSocialApi.gift(activity, params, listener);
+        return 0;
+    }
+
+    public int ask(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "ask()");
+        SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+        mSocialApi.ask(activity, params, listener);
+        return 0;
+    }
+
+    public void requestAsync(String graphPath, Bundle params,
+            String httpMethod, IRequestListener listener, Object state) {
+    	SLog.i(TAG, "requestAsync()");
+        HttpUtils.requestAsync(mQQAuth.getQQToken(), Global.getContext(), graphPath, params,
+                httpMethod, listener);
+    }
+
+    public JSONObject request(String graphPath, Bundle params, String httpMethod)
+            throws IOException, JSONException, HttpUtils.NetworkUnavailableException,
+            HttpUtils.HttpStatusException {
+    	SLog.i(TAG, "request()");
+        return HttpUtils.request(mQQAuth.getQQToken(), Global.getContext(), graphPath, params,
+                httpMethod);
+    }
+
+    public void shareToQQ(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "shareToQQ()");
+        QQShare qqShare = new QQShare(activity, mQQAuth.getQQToken());
+        qqShare.shareToQQ(activity, params, listener);
+    }
+
+    public void shareToQzone(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "shareToQzone()");
+        QzoneShare qzoneShare = new QzoneShare(activity, mQQAuth.getQQToken());
+        qzoneShare.shareToQzone(activity, params, listener);
+    }
+
+    public void publishToQzone(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "publishToQzone()");
+        QzonePublish qzonePublish = new QzonePublish(activity, mQQAuth.getQQToken());
+        qzonePublish.publishToQzone(activity, params, listener);
+    }
+
+    public void releaseResource() {
+    }
+
+    /**
+     * @deprecated 建议使用onHandleResult
+     */
+    public boolean onActivityResult(int requestCode, int resultCode, Intent data) {
+    	SLog.i(TAG, "onActivityResult() deprecated, will do nothing");
+    	return false;
+    }
+    
+    /**
+     * 
+     * @param requestCode
+     * @param resultCode
+     * @param data
+     * @param listener
+     * @return
+     */
+    public static boolean onActivityResultData(int requestCode, int resultCode, Intent data, IUiListener listener){
+    	SLog.i(TAG, "onActivityResultData() reqcode = " + requestCode + ", resultcode = " + resultCode +
+    			", data = null ? " + (data == null) + ", listener = null ? " + (listener == null));
+    	return UIListenerManager.getInstance().onActivityResult(requestCode, resultCode, data, listener);
+    }
+
+    public boolean isSessionValid() {
+        return mQQAuth.isSessionValid();
+    }
+
+    public String getAppId() {
+        return mQQAuth.getQQToken().getAppId();
+    }
+
+    public String getAccessToken() {
+        return mQQAuth.getQQToken().getAccessToken();
+    }
+
+    public long getExpiresIn() {
+        return mQQAuth.getQQToken().getExpireTimeInSecond();
+    }
+
+   /**
+    * 获取已登录用户的openId。<br>
+    * <br>
+    * openId为对当前应用进行授权的QQ用户的身份识别码，应用应将openId与应用中的用户帐号进行关系绑定，以此来支持多帐号。<br>
+    * <br>
+    * SDK会在调用{@link Constants#ACTION_LOGIN}、 {@link Constants#GRAPH_OPEN_ID}
+    * 成功之后自动记录open_id.<br>
+    *
+    * @return openId
+    */
+    public String getOpenId() {
+        return mQQAuth.getQQToken().getOpenId();
+    }
+
+	 /**
+	  * 处理onActivityResult回调的数据。<br>
+	  * <br>
+	  * 如果调用的Activity被销毁了, 登录成功的数据会通过onActivityResult返回到调用的Activity.这个时候可以创建IUiListener并调用该方法。<br>
+	  * 尽量保持了原接口的一致性。<br>
+	  *
+	  * @deprecated 建议使用handleResultData
+	  * @param data
+	  * @param listener
+	  */
+	 @Deprecated
+    public void handleLoginData(Intent data, IUiListener listener) {
+		 SLog.i(TAG, "handleLoginData() data = null ? " + (data == null) + ", listener = null ? " + (listener == null));
+		 UIListenerManager.getInstance().handleDataToListener(data, listener);
+	 }
+
+	 /**
+	  * 处理onActivityResult回调的数据。<br>
+	  * <br>
+	  * 如果调用的Activity被销毁了, 登录成功的数据会通过onActivityResult返回到调用的Activity.这个时候可以创建IUiListener并调用该方法。<br>
+	  * 尽量保持了原接口的一致性。<br>
+	  *
+	  * @param data
+	  * @param listener
+	  */
+	 public static void handleResultData(Intent data, IUiListener listener) {
+		 SLog.i(TAG, "handleResultData() data = null ? " + (data == null) + ", listener = null ? " + (listener == null));
+		 UIListenerManager.getInstance().handleDataToListener(data, listener);
+	 }
+
+    /**
+    * 从外部设置access_token、expires_in。<br>
+    * <br>
+    * SDK在此不检验此参数的有效性，应用应保证参数为
+    * {@link Tencent#login(Activity, String, IUiListener)} 的返回结果。否则之后的调用可能出错。 <br>
+    * <br>
+    * 建议按如下方式使用该接口: <li>1. login成功后, 把获取到的 expires_in 跟当前时间相加之后保存, <br>
+    * 如: real_expires_in = System.currentTimeMillis() +
+    * Long.parseLong(expires_in) * 1000; <li>2. 在需要调用该接口时, 再把real_expires_in
+    * 换算成 expires_in, <br>
+    * 如: expires_in = (real_expires_in - System.currentTimeMillis()) / 1000 +
+    * ""; <li>3. 之后把保存的 access_token 和计算出来的 expires_in 传给 setAccessToken 即可
+    *
+    * @param token
+    * @param expiresIn
+    */
+    public void setAccessToken(String token, String expiresIn) {
+       SLog.v(TAG, "setAccessToken(), expiresIn = " + expiresIn + "");
+       mQQAuth.setAccessToken(token, expiresIn);
+    }
+
+   /**
+    * 从外部设置openId。<br>
+    * <br>
+    * SDK不检验外部传入的参数的有效性，应用应保证此值为{@link Constants#GRAPH_OPEN_ID}
+    * 的返回结果，否则之后的调用可能出错。<br>
+    *
+    * @param openId
+    */
+   public void setOpenId(String openId) {
+       SLog.v(TAG, "setOpenId() --start");
+       //mTContext.setOpenId(openId);
+       //TencentStat.reportQQ(mTContext, openId);
+       mQQAuth.setOpenId(Global.getContext(), openId);
+       SLog.v(TAG, "setOpenId() --end");
+   }
+
+   //donald add
+
+   /** 判断是否已经登录，且应用已获取openid
+    * @return boolean
+    */
+   public boolean isReady() {
+       boolean ready = isSessionValid() && getOpenId() != null;
+       return ready;
+   }
+
+   public QQToken getQQToken() {
+       return mQQAuth.getQQToken();
+   }
+   /**
+    *
+    * @param activity
+    * @return
+    */
+   public boolean isSupportSSOLogin(Activity activity){
+	   //QQPad版本从QQ5.5拉出，支持SSO登录
+	   if (Util.isTablet(activity)) {
+		   if (SystemUtils.getAppVersionName(activity, Constants.PACKAGE_QQ_PAD) != null) {
+			   return true;
+		   }
+	   }
+
+	   //QQ 4.1(含)以上，TIM 1.1(含)以上,QIM 1.0 以上 版本支持SSO登录
+	   return SystemUtils.compareQQVersion(activity, "4.1") >= 0
+			   || SystemUtils.compareTimVersion(activity, "1.1") >= 0
+			   || SystemUtils.compareQimVersion(activity, "1.0") >= 0;
+   }
+
+    //-----------------------------------
+    //下面的注释请勿删除，编译lite版的时候需要删除
+    //[liteexludestart]
+    public void makeFriend(Activity activity, Bundle params) {
+   		GameAppOperation gameApi = new GameAppOperation(getQQToken());
+   		gameApi.makeFriend(activity, params);
+    }
+
+   /**
+    * 游戏内绑群<br>
+    * <br>
+    *
+    * @param activity
+    *            调用者Activity
+    * @param params
+    *            调用参数，必须包含：unionid, union_name, zoneid, signature
+    */
+    public void bindQQGroup(Activity activity, Bundle params) {
+       GameAppOperation gameApi = new GameAppOperation(getQQToken());
+       gameApi.bindQQGroup(activity, params);
+    }
+
+    /**
+     * 收藏信息到手机QQ我的收藏<br>
+     *
+     * @param activity
+     *            调用者Activity
+     * @param params
+     *            调用参数，不同类型的收藏，需要传入不同的参数，详见开发文档或官网API说明
+     * @param listener
+     *            回调Listener
+     */
+    public void addToQQFavorites(Activity activity, Bundle params, IUiListener listener) {
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.addToQQFavorites(activity, params, listener);
+    }
+
+    /**
+     * 传输信息到手机QQ我的电脑<br>
+     *
+     * @param activity
+     *            调用者Activity
+     * @param params
+     *            调用参数，不同类型的传输，需要传入不同的参数，详见开发文档或官网API说明
+     * @param listener
+     *            回调Listener
+     */
+    public void sendToMyComputer(Activity activity, Bundle params, IUiListener listener) {
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.sendToMyComputer(activity, params, listener);
+    }
+
+    /**
+     * 传输信息到手机QQ我的电脑<br>
+     *
+     * @param activity
+     *            调用者Activity
+     * @param params
+     *            调用参数，不同类型的传输，需要传入不同的参数，详见开发文档或官网API说明
+     * @param listener
+     *            回调Listener
+     */
+    public void shareToTroopBar(Activity activity, Bundle params, IUiListener listener) {
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.shareToTroopBar(activity, params, listener);
+    }
+
+    /**
+     * 通过传入uin唤起会话界面，uin为QQ号码。
+     * 
+     * @param activity
+     * @param uin
+     *            QQ号码
+     * @param text
+     *            附加信息
+     * @return int
+     *         0: success
+     *         -1: uin is empty
+     *         -2: no browser
+     *         -3: length < 5
+     *         -4: uin not digits
+     */
+    public int startWPAConversation(Activity activity, String uin, String text) {
+        return startWPAConversation(activity, WPA.CHAT_TYPE_WPA, uin, text);
+    }
+
+    /**
+     * 通过传入uin唤起会话界面，uin可以是QQ号码或是群号码。<br>
+     * 
+     * 群会话应该满足两个条件：<br>
+     * 1. 手Q已经登陆
+     * 2. 群号码为登陆QQ的群号码 <br>
+     * 
+     * @param activity
+     * @param chatType
+     *            WAP.CHAT_TYPE_WPA: QQ会话
+     *            WAP.CHAT_TYPE_GROUP: 群会话
+     * @param uin
+     *            QQ号码或群号码
+     * @param text
+     *            附加信息
+     * @return int
+     *         0: success <br>
+     *         -1: uin is empty <br>
+     *         -2: no browser <br>
+     *         -3: length < 5 <br>
+     *         -4: uin not digits <br>
+     *         -5: unkonwn chat type <br>
+     */
+    public int startWPAConversation(Activity activity, String chatType, String uin, String text) {
+    	SLog.i(TAG, "startWPAConversation()");
+        WPA wpa = new WPA(getQQToken());
+        return wpa.startWPAConversation(activity, chatType, uin, text);
+    }
+
+    public void getWPAUserOnlineState(String uin, IUiListener listener) {
+    	SLog.i(TAG, "getWPAUserOnlineState()");
+        WPA wpa = new WPA(getQQToken());
+        wpa.getWPAUserOnlineState(uin, listener);
+    }
+
+    private LocationApi mLocationApi;
+    private AppbarAgent mAgent;
+	public int reactive(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "reactive()");
+		SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+		mSocialApi.reactive(activity, params, listener);
+		return 0;
+    }
+
+	public int searchNearby(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "searchNearby()");
+		if (mLocationApi == null) {
+            mLocationApi = new LocationApi(mQQAuth.getQQToken());
+        }
+		mLocationApi.searchNearby(activity, params, listener);
+		return 0;
+	}
+
+	public int deleteLocation(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "deleteLocation()");
+		if (mLocationApi == null) {
+            mLocationApi = new LocationApi(mQQAuth.getQQToken());
+        }
+		mLocationApi.deleteLocation(activity, params, listener);
+		return 0;
+    }
+
+	public int brag(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "brag()");
+		SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+		mSocialApi.brag(activity, params, listener);
+		return 0;
+	}
+
+	public int challenge(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "challenge()");
+		SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+		mSocialApi.challenge(activity, params, listener);
+		return 0;
+	}
+
+	public void setAvatar(Activity activity, Bundle params, IUiListener listener) {
+		SLog.i(TAG, "setAvatar()");
+		String picUri = params.getString(AvatarConstants.PARAM_AVATAR_URI);
+		int exitAnim = params.getInt("exitAnim");
+		QQAvatar mQQAvatar = new QQAvatar(mQQAuth.getQQToken());
+		mQQAvatar.setAvatar(activity, Uri.parse(picUri), listener, exitAnim);
+	}
+
+	 public void setAvatar(Activity activity, Bundle params, IUiListener listener, int enterAnim,
+	            int exitAnim) {
+		 SLog.i(TAG, "setAvatar()");
+		 params.putInt("exitAnim", exitAnim);
+		// 进入动画
+		 activity.overridePendingTransition(enterAnim, 0);
+		 setAvatar(activity, params, listener);
+	 }
+
+	 public void grade(Activity activity, Bundle params, IUiListener listener) {
+		 SLog.i(TAG, "grade()");
+		 SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+		 mSocialApi.grade(activity, params, listener);
+	 }
+
+
+	 public void voice(Activity activity, Bundle params, IUiListener listener) {
+		 SLog.i(TAG, "voice()");
+		 SocialApi mSocialApi = new SocialApi(mQQAuth.getQQToken());
+		 mSocialApi.voice(activity, params, listener);
+	 }
+
+	 public void showTaskGuideWindow(Activity activity, Bundle params, IUiListener listener) {
+		 SLog.i(TAG, "showTaskGuideWindow()");
+		 TaskGuide mTaskGuide = new TaskGuide(activity, mQQAuth.getQQToken());
+	    	mTaskGuide.showTaskGuideWindow(activity,params,listener);
+	 }
+
+	 public void startAppbar(Activity activity, String toPage) {
+		 SLog.i(TAG, "startAppbar()");
+		 if (mAgent == null) {
+			 mAgent = new AppbarAgent(mQQAuth.getQQToken());
+		 }
+		 mAgent.startAppbar(activity, toPage);
+	 }
+
+	 public void startAppbarLabel(Activity activity, String label) {
+		 SLog.i(TAG, "startAppbarLabel()");
+	     if (mAgent == null) {
+             mAgent = new AppbarAgent(mQQAuth.getQQToken());
+         }
+	     mAgent.startAppbarLabel(activity, label);
+	 }
+
+    /**
+     * 有奖分享，分享给QQ好友
+     * 
+     * @param activity
+     * @param params
+     *            参数信息,具体见{@link GameAppOperation}
+     * @param listener
+     */
+    public void sharePrizeToQQ(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "sharePrizeToQQ()");
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.sharePrizeToQQ(activity, params, listener);
+    }
+
+    /**
+     * 查询未兑换奖品，通过activityid查询未奖品信息，需要先登录获取openid
+     * 
+     * @param activity
+     * @param listener
+     */
+    public void queryUnexchangePrize(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "queryUnexchangePrize()");
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.queryUnexchangePrize(activity, params, listener);
+    }
+
+    /**
+     * 兑换奖品信息
+     * 
+     * @param activity
+     * @param params
+     *            包含shareid list 以及imei信息
+     * @param listener
+     */
+    public void exchangePrize(Activity activity, Bundle params, IUiListener listener) {
+    	SLog.i(TAG, "exchangePrize()");
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.exchangePrize(activity, params, listener);
+    }
+
+    /**
+     * 检查活动是否过期
+     * 
+     * @param activity
+     * @param activityId
+     *            活动id
+     * @param listener
+     */
+    public void checkActivityAvailable(Activity activity, String activityId, IUiListener listener) {
+    	SLog.i(TAG, "checkActivityAvailable()");
+        GameAppOperation gameApi = new GameAppOperation(getQQToken());
+        gameApi.isActivityAvailable(activity, activityId, listener);
+    }
+
+    /**
+     * 检查是否有奖品可以领取，以下场景会有奖品：<br>
+     * <br>
+     * intent里包含页面传递过来的参数 <br>
+     * 
+     * @param activity
+     * @param intent
+     * @return
+     */
+    public boolean checkPrizeByIntent(Activity activity, Intent intent) {
+    	SLog.i(TAG, "checkPrizeByIntent()");
+        boolean startBySharePrize = false;
+        if (intent == null) {
+            SLog.e(TAG, "-->check by prize by intent, intent is null.");
+
+        } else {
+            startBySharePrize = intent.getBooleanExtra(AuthActivity.ACTION_SHARE_PRIZE, false);
+        }
+        return startBySharePrize;
+    }
+
+    /**
+     * 通过主题ID进入主题
+     * 
+     * @param activity
+     * @param threadId
+     */
+	 public void startAppbarThread(Activity activity, String threadId) {
+		 SLog.i(TAG, "startAppbarThread()");
+		 if (mAgent == null) {
+			 mAgent = new AppbarAgent(mQQAuth.getQQToken());
+		 }
+		 mAgent.startAppbarThread(activity, threadId);
+	 }
+
+    /**
+     *
+     * @param key
+     *            由官网生成的key
+     * @return 
+	 *            返回true表示呼起手Q成功，返回fals表示呼起失败
+     */
+	 public boolean joinQQGroup(Activity activity, String key) {
+		 SLog.i(TAG, "joinQQGroup()");
+	     Intent intent = new Intent();
+		 String openId = mQQAuth.getQQToken().getOpenId();
+		 String appid = mQQAuth.getQQToken().getAppId();
+		 StringBuffer url = new StringBuffer("mqqopensdkapi://bizAgent/qm/qr?url=http%3A%2F%2Fqm.qq.com%2Fcgi-bin%2Fqm%2Fqr%3Ffrom%3Dapp%26p%3Dandroid%26k%3D" + key);
+		 if (!TextUtils.isEmpty(openId)) {
+			 url.append("&openid=" + Base64.encodeToString(Util.getBytesUTF8(openId), Base64.NO_WRAP));
+		 }
+		 if (!TextUtils.isEmpty(appid)) {
+			 url.append("&appid=" + appid);
+		 }
+		 intent.setData(Uri.parse(url.toString()));
+		 // 此Flag可根据具体产品需要自定义，如设置，则在加群界面按返回，返回手Q主界面，不设置，按返回会返回到呼起产品界面    //intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+	     try {
+	         activity.startActivity(intent);
+            OpenSdkStatic.getInstance().reportVia(mQQAuth.getQQToken().getOpenId(), mQQAuth.getQQToken().getAppId(),
+                    Constants.VIA_JOIN_GROUP, Constants.VIA_REPORT_TYPE_JOININ_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                    Constants.VIA_RESULT_SUCCESS);
+	         return true;
+	     } catch (Exception e) {
+	         // 未安装手Q或安装的版本不支持
+            OpenSdkStatic.getInstance().reportVia(mQQAuth.getQQToken().getOpenId(), mQQAuth.getQQToken().getAppId(),
+                    Constants.VIA_JOIN_GROUP, Constants.VIA_REPORT_TYPE_JOININ_GROUP, Constants.VIA_ACT_TYPE_EIGHTEEN,
+                    Constants.VIA_RESULT_FAIL);
+	         return false;
+	     }
+	 }
+	//[liteexludeend]
+
+	public boolean isQQInstalled(Context context) {
+		final PackageManager packageManager = context.getPackageManager();
+		List<PackageInfo> pinfo = packageManager.getInstalledPackages(0);
+		if (pinfo != null) {
+			for (int i = 0; i < pinfo.size(); i++) {
+				String pn = pinfo.get(i).packageName;
+				if (pn.equals("com.tencent.mobileqq")) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+}

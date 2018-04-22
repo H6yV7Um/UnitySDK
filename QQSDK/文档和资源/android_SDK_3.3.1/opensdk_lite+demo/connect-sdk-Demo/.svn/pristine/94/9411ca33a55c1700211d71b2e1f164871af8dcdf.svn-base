@@ -1,0 +1,765 @@
+package com.tencent.connect.avatar;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import android.app.Activity;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ActivityInfo;
+import android.content.pm.ResolveInfo;
+import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Color;
+import android.graphics.Matrix;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.StateListDrawable;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.text.TextUtils.TruncateAt;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup.LayoutParams;
+import android.view.ViewTreeObserver;
+import android.view.Window;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.ImageView.ScaleType;
+import android.widget.LinearLayout;
+import android.widget.ProgressBar;
+import android.widget.RelativeLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import com.tencent.connect.UserInfo;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.report.OpenSdkStatic;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.Util;
+
+public class ImageActivity extends Activity {
+	private static final String PARAM_AVATAR_RETURN_ACTIVITY = "return_activity";
+	private static final String GRAPH_SET_AVATAR = "user/set_user_face";
+
+    private static final int MAX_GET_USER_NICK_COUNT = 2;
+
+    // 用于调用api 设置头像
+    private QQToken mToken;
+    // 操作完要返回到的activity的名字, com.tencent.Xxx
+    private String returnActivity;
+
+    // 用于在回调中使用UI线程改变UI
+    private Handler mHandler;
+
+    private TouchView imageView;
+    private Button okButton;
+    private Button cancelButton;
+    // private String imageType;
+    private MaskView maskView;
+    private TextView userNickTextView;
+    private ProgressBar progressBar;
+
+    private int getUserNickCount = 0;
+    private boolean isRetry = false;
+    private long startTime = 0;
+
+    private int exitAnim = 0;
+
+    private final int resultWidth = AvatarConstants.AVATAR_SIZE;
+    private final int resultHeight = AvatarConstants.AVATAR_SIZE;
+    private Rect clipRect = new Rect();
+    private String pictureUri;
+    private Bitmap inputBitmap;
+    RelativeLayout layout;
+
+    /**
+     * decode这个图片并且按比例缩放以减少内存消耗，虚拟机对每张图片的缓存大小也是有限制的
+     *
+     * @param filePath
+     * @return
+     * @throws IOException
+     */
+    private Bitmap readBitmap(String filePath) throws IOException {
+        // decode image size
+        BitmapFactory.Options o = new BitmapFactory.Options();
+        o.inJustDecodeBounds = true;
+        Uri uri = Uri.parse(filePath);
+        InputStream inputStream = getContentResolver().openInputStream(uri);
+
+        if (inputStream == null) {
+        	return null;
+        }
+
+        Bitmap bm = null;
+        try {
+            bm = BitmapFactory.decodeStream(inputStream, null, o);
+        } catch (OutOfMemoryError e) {
+            e.printStackTrace();
+        }
+        inputStream.close();
+
+        // Find the correct scale value. It should be the power of 2.
+        int maxSize = AvatarConstants.MAX_SOURCE_SIZE
+                * AvatarConstants.MAX_SOURCE_SIZE;
+        int width = o.outWidth, height = o.outHeight;
+        int scale = 1;
+        while (true) {
+            if (width * height <= maxSize) {
+                break;
+            }
+            width /= 2;
+            height /= 2;
+            scale *= 2;
+        }
+        o.inJustDecodeBounds = false;
+        o.inSampleSize = scale;
+        // 原来的inputstream已经被读取了, 要重新读取文件
+        inputStream = getContentResolver().openInputStream(uri);
+        try {
+            bm = BitmapFactory.decodeStream(inputStream, null, o);
+        } catch (OutOfMemoryError e) {
+            e.printStackTrace();
+            bm = null;
+        }
+
+        // imageType = o.outMimeType;// Utility.getType(b);
+        return bm;
+    }
+
+    private Drawable getDrawable(String fileName) {
+
+        AssetManager assetManager = this.getAssets();
+        Drawable drawable = null;
+        try {
+            InputStream inputStream = assetManager.open(fileName);
+            drawable = Drawable.createFromStream(inputStream, fileName);
+            inputStream.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return drawable;
+    }
+
+    private View createLayoutView() {
+        LayoutParams fillParentLayoutParams = new LayoutParams(
+                LayoutParams.FILL_PARENT, LayoutParams.FILL_PARENT);
+        LayoutParams matchParentLayoutParams = new LayoutParams(
+                LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT);
+        LayoutParams wrapContentLayoutParams = new LayoutParams(
+                LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
+
+        layout = new RelativeLayout(this);
+        layout.setLayoutParams(fillParentLayoutParams);
+        layout.setBackgroundColor(Color.BLACK);
+        // 显示图片和图片选择区域
+        RelativeLayout mainLayout = new RelativeLayout(this);
+        mainLayout.setLayoutParams(wrapContentLayoutParams);
+        layout.addView(mainLayout);
+        // 图片
+        imageView = new TouchView(this);
+        imageView.setLayoutParams(matchParentLayoutParams);
+        imageView.setScaleType(ScaleType.MATRIX);
+        mainLayout.addView(imageView);
+        // 遮罩
+        maskView = new MaskView(this);
+        RelativeLayout.LayoutParams maskViewLayoutParams = new RelativeLayout.LayoutParams(
+                matchParentLayoutParams);
+        maskViewLayoutParams.addRule(RelativeLayout.CENTER_HORIZONTAL,
+                RelativeLayout.TRUE);
+        maskViewLayoutParams.addRule(RelativeLayout.CENTER_VERTICAL,
+                RelativeLayout.TRUE);
+        maskView.setLayoutParams(maskViewLayoutParams);
+        mainLayout.addView(maskView);
+
+        // 顶部logo和昵称
+        LinearLayout topLayout = new LinearLayout(this);
+        RelativeLayout.LayoutParams topLayoutParams = new RelativeLayout.LayoutParams(
+                LayoutParams.WRAP_CONTENT, DensityUtil.dip2px(this,
+                        AvatarConstants.TOPBAR_HEIGHT));
+        topLayoutParams.addRule(RelativeLayout.CENTER_HORIZONTAL,
+                RelativeLayout.TRUE);
+        topLayout.setLayoutParams(topLayoutParams);
+        topLayout.setOrientation(LinearLayout.HORIZONTAL);
+        topLayout.setGravity(Gravity.CENTER);
+        layout.addView(topLayout);
+        // logo
+        ImageView logoView = new ImageView(this);
+        LinearLayout.LayoutParams logoLayoutParams = new LinearLayout.LayoutParams(
+                DensityUtil.dip2px(this, 24), DensityUtil.dip2px(this, 24));
+        logoView.setLayoutParams(logoLayoutParams);
+        logoView.setImageDrawable(getDrawable(AvatarConstants.LOGO_FILE_NAME));
+        topLayout.addView(logoView);
+        // 昵称
+        userNickTextView = new TextView(this);
+        LinearLayout.LayoutParams userNickLayoutParams = new LinearLayout.LayoutParams(
+                wrapContentLayoutParams);
+        userNickLayoutParams.leftMargin = DensityUtil.dip2px(this, 7);
+        userNickTextView.setLayoutParams(userNickLayoutParams);
+        userNickTextView.setEllipsize(TruncateAt.END);
+        userNickTextView.setSingleLine();
+        userNickTextView.setTextColor(Color.WHITE);
+        userNickTextView.setTextSize(24);
+        userNickTextView.setVisibility(View.GONE);
+        topLayout.addView(userNickTextView);
+
+        // 底部按钮栏
+        RelativeLayout bottomLayout = new RelativeLayout(this);
+        RelativeLayout.LayoutParams bottomLayoutParams = new RelativeLayout.LayoutParams(
+                LayoutParams.MATCH_PARENT, DensityUtil.dip2px(this,
+                        AvatarConstants.TOOLBAR_HEIGHT));
+
+        bottomLayoutParams.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM,
+                RelativeLayout.TRUE);
+        bottomLayoutParams.addRule(RelativeLayout.ALIGN_PARENT_LEFT,
+                RelativeLayout.TRUE);
+        bottomLayout.setLayoutParams(bottomLayoutParams);
+        bottomLayout
+                .setBackgroundDrawable(getDrawable(AvatarConstants.TOOLBAR_BG_FILE_NAME));
+        int padding = DensityUtil.dip2px(this, 10);
+        bottomLayout.setPadding(padding, padding, padding, 0);
+        layout.addView(bottomLayout);
+        ButtonUtility buttonUtility = new ButtonUtility(this);
+
+        int buttonLRPadding = DensityUtil.dip2px(this, 14);
+        int buttonTBPadding = DensityUtil.dip2px(this, 7);
+        // 取消按钮
+        cancelButton = new Button(this);
+        RelativeLayout.LayoutParams cancelButtonLayoutParams = new RelativeLayout.LayoutParams(
+                DensityUtil.dip2px(this, 78), DensityUtil.dip2px(this, 45));
+        cancelButton.setLayoutParams(cancelButtonLayoutParams);
+        cancelButton.setText(AvatarConstants.CANCEL_STRING);
+        cancelButton.setTextColor(Color.WHITE);
+        // cancelButton.setBackgroundDrawable(buttonUtility.setGrayBg());
+        cancelButton.setTextSize(18);
+        cancelButton.setPadding(buttonLRPadding, buttonTBPadding,
+                buttonLRPadding, buttonTBPadding);
+
+        buttonUtility.setGrayButton(cancelButton);
+        bottomLayout.addView(cancelButton);
+        // 确认按钮
+        okButton = new Button(this);
+        RelativeLayout.LayoutParams okButtonLayoutParams = new RelativeLayout.LayoutParams(
+                DensityUtil.dip2px(this, 78), DensityUtil.dip2px(this, 45));
+        okButtonLayoutParams.addRule(RelativeLayout.ALIGN_PARENT_RIGHT,
+                RelativeLayout.TRUE);
+        okButton.setLayoutParams(okButtonLayoutParams);
+        okButton.setTextColor(Color.WHITE);
+        okButton.setTextSize(18);
+        okButton.setPadding(buttonLRPadding, buttonTBPadding, buttonLRPadding,
+                buttonTBPadding);
+        okButton.setText(AvatarConstants.OK_STRING);
+
+        buttonUtility.setBlueButton(okButton);
+        bottomLayout.addView(okButton);
+
+        // 底部提示文字
+        TextView tipsTextView = new TextView(this);
+        RelativeLayout.LayoutParams tipsTextLayoutParams = new RelativeLayout.LayoutParams(
+                wrapContentLayoutParams);
+        tipsTextLayoutParams.addRule(RelativeLayout.CENTER_IN_PARENT,
+                RelativeLayout.TRUE);
+        tipsTextView.setLayoutParams(tipsTextLayoutParams);
+        tipsTextView.setText(AvatarConstants.ACTOIN_TIPS_STRING);
+        tipsTextView.setPadding(0, DensityUtil.dip2px(this, 3), 0, 0);
+        tipsTextView.setTextSize(18);
+        tipsTextView.setTextColor(Color.WHITE);
+        bottomLayout.addView(tipsTextView);
+
+        // 进度条
+        progressBar = new ProgressBar(this);
+        RelativeLayout.LayoutParams progressBarLayoutParams = new RelativeLayout.LayoutParams(
+                wrapContentLayoutParams);
+        progressBarLayoutParams.addRule(RelativeLayout.CENTER_HORIZONTAL,
+                RelativeLayout.TRUE);
+        progressBarLayoutParams.addRule(RelativeLayout.CENTER_VERTICAL,
+                RelativeLayout.TRUE);
+        progressBar.setLayoutParams(progressBarLayoutParams);
+        progressBar.setVisibility(View.GONE);
+        layout.addView(progressBar);
+
+        return layout;
+    }
+
+    class ButtonUtility extends View {
+
+        public ButtonUtility(Context context) {
+            super(context);
+        }
+
+        public void setBlueButton(Button button) {
+            StateListDrawable bg = new StateListDrawable();
+
+            Drawable normal = getDrawable(AvatarConstants.BUTTON_BLUE_FILE_NAME);
+            Drawable press = getDrawable(AvatarConstants.BUTTON_BLUE_PRESS_FILE_NAME);
+            Drawable empty = getDrawable(AvatarConstants.BUTTON_BLUE_DISABLE_NAME);
+
+            bg.addState(View.PRESSED_ENABLED_STATE_SET, press);
+            bg.addState(View.ENABLED_FOCUSED_STATE_SET, normal);
+            bg.addState(View.ENABLED_STATE_SET, normal);
+            bg.addState(View.FOCUSED_STATE_SET, normal);
+            bg.addState(View.EMPTY_STATE_SET, empty);
+            button.setBackgroundDrawable(bg);
+        }
+
+        public void setGrayButton(Button button) {
+            StateListDrawable bg = new StateListDrawable();
+
+            Drawable normal = getDrawable(AvatarConstants.BUTTON_GRAY_FILE_NAME);
+            Drawable press = getDrawable(AvatarConstants.BUTTON_GRAY_PRESS_FILE_NAME);
+            Drawable empty = getDrawable(AvatarConstants.BUTTON_GRAY_DISABLE_NAME);
+
+            bg.addState(View.PRESSED_ENABLED_STATE_SET, press);
+            bg.addState(View.ENABLED_FOCUSED_STATE_SET, normal);
+            bg.addState(View.ENABLED_STATE_SET, normal);
+            bg.addState(View.FOCUSED_STATE_SET, normal);
+            bg.addState(View.EMPTY_STATE_SET, empty);
+
+            button.setBackgroundDrawable(bg);
+        }
+
+    }
+
+    private void initViews() {
+
+        try {
+            inputBitmap = readBitmap(pictureUri);
+            if (inputBitmap == null) {
+                throw new IOException("cannot read picture: '" + pictureUri
+                        + "'!");
+            }
+            /*
+             * if(imageType.equals("GIF")){ gifView=(GifView)
+             * findViewById(R.id.gifView); gifView.setVisibility(View.VISIBLE);
+             * imageView.setVisibility(View.GONE); } else{
+             */
+            imageView.setImageBitmap(inputBitmap);
+            // imageView.setOnTouchListener(this);
+            // }
+        } catch (IOException e) {
+            e.printStackTrace();
+            String msg = Constants.MSG_IMAGE_ERROR;
+            showTips(msg, 1);
+            setSdkResult(Constants.ERROR_PARAM, null, msg, e.getMessage());
+            finishActivity();
+
+        }
+
+        // maskView = (MaskView) findViewById(R.id.maskView);
+        // // rectView = (RectView) findViewById(R.id.rectView);
+        // userNickTextView = (TextView) findViewById(R.id.userNickTextView);
+        // progressBar = (ProgressBar) findViewById(R.id.progressBar);
+        //
+        // okButton = (Button) findViewById(R.id.okBtn);
+        // cancelButton = (Button) findViewById(R.id.cancelBtn);
+
+        okButton.setOnClickListener(onOKButtonClickListener);
+        cancelButton.setOnClickListener(onCancelButtonClickListener);
+        // 在UI线程中运行初始化函数，因为在oncreate的时候是获取不到控件的尺寸，
+        // 必须在界面初始化之后，这里用imageview做参考点
+        layout.getViewTreeObserver().addOnGlobalLayoutListener(
+                new ViewTreeObserver.OnGlobalLayoutListener() {
+                    @Override
+                    public void onGlobalLayout() {
+                        layout.getViewTreeObserver()
+                                .removeGlobalOnLayoutListener(this);
+                        clipRect = maskView.getMaskRect();
+                        // SLog.v(TAG, clipRect.width() + ":" +
+                        // clipRect.height());
+                        imageView.setClipRect(clipRect);
+                        // SLog.v(TAG, "density: " +
+                        // getResources().getDisplayMetrics().density + "--");
+                        // SLog.v(TAG, "densityDpi: " +
+                        // getResources().getDisplayMetrics().densityDpi +
+                        // "--");
+                        // SLog.v(TAG, "button: " + okButton.getWidth());
+                        // rectView是用来测试预览的, 发布时要删去
+                        // LayoutParams params = new
+                        // LayoutParams(clipRect.width(),
+                        // clipRect.height());
+                        // params.setMargins(clipRect.left, clipRect.top, 0, 0);
+                        // rectView.setLayoutParams(params);
+
+                    }
+                });
+    }
+
+    /** Called when the activity is first created. */
+    @Override
+    public void onCreate(Bundle savedInstanceState) {
+    	requestWindowFeature(Window.FEATURE_NO_TITLE);
+        super.onCreate(savedInstanceState);        
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        setContentView(createLayoutView());
+
+        mHandler = new Handler();
+
+        Bundle params = getIntent().getBundleExtra(Constants.KEY_PARAMS);
+
+        pictureUri = params.getString(AvatarConstants.PARAM_AVATAR_URI);
+        returnActivity = params.getString(PARAM_AVATAR_RETURN_ACTIVITY);
+
+        String appId = params.getString(Constants.PARAM_APP_ID);
+        String accessToken = params.getString(Constants.PARAM_ACCESS_TOKEN);
+        long expiresIn = params.getLong(Constants.PARAM_EXPIRES_IN);
+        String openId = params.getString(Constants.PARAM_OPEN_ID);
+        exitAnim = params.getInt("exitAnim");
+
+        mToken = new QQToken(appId);
+        mToken.setAccessToken(accessToken,
+                (expiresIn - System.currentTimeMillis()) / 1000 + "");
+        mToken.setOpenId(openId);
+
+        initViews();
+
+        // 获取用户昵称
+        getUserNick();
+        startTime = System.currentTimeMillis();
+        report("10653", 0);// 设置头像界面
+    }
+
+    @Override
+    public void onBackPressed() {
+        setResult(Constants.ACTIVITY_CANCEL);
+        finishActivity();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        imageView.setImageBitmap(null);
+        if (inputBitmap != null && !inputBitmap.isRecycled()) {
+            inputBitmap.recycle();
+        }
+    }
+
+    private final View.OnClickListener onOKButtonClickListener = new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            progressBar.setVisibility(View.VISIBLE);
+            // progressBar.bringToFront();
+            cancelButton.setEnabled(false);
+            cancelButton.setTextColor(Color.rgb(21, 21, 21));
+            okButton.setEnabled(false);
+            okButton.setTextColor(Color.rgb(36, 94, 134));
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    // 运算量比较多, 用一个新线程计算
+                    doClip();
+                }
+            }).start();
+            if (isRetry) {
+                report("10657", 0);// 点击重试按钮
+            } else {
+                long costTime = System.currentTimeMillis() - startTime;
+                report("10655", costTime);// 点击选取按钮.
+                if (imageView.isMoveOrZoom) {
+                    report("10654", 0);// 有缩放和移动动作
+                }
+            }
+        }
+    };
+
+    private final View.OnClickListener onCancelButtonClickListener = new View.OnClickListener() {
+        @Override
+        public void onClick(View v) {
+            long costTime = System.currentTimeMillis() - startTime;
+            report("10656", costTime);// 点击取消按钮
+            setResult(Constants.ACTIVITY_CANCEL);
+            finishActivity();
+        }
+    };
+
+    private void doClip() {
+        float clipWidth = clipRect.width();// 方框宽度
+        Matrix matrix = imageView.getImageMatrix();
+        float[] values = new float[9];
+        matrix.getValues(values);
+        float globalX = values[Matrix.MTRANS_X];
+        float globalY = values[Matrix.MTRANS_Y];
+        float scale = values[Matrix.MSCALE_X];
+        float scale2 = resultWidth / clipWidth;
+        int left = (int) ((clipRect.left - globalX) / scale);
+        left = left < 0? 0 : left;
+        int top = (int) ((clipRect.top - globalY) / scale);
+        top = top < 0? 0 : top;
+        Matrix resultMatrix = new Matrix();
+        resultMatrix.set(matrix);
+        resultMatrix.postScale(scale2, scale2);
+
+        int fixSize = (int) ((AvatarConstants.AVATAR_SIZE + 10) / scale);
+        int clipWidth2 = Math.min(inputBitmap.getWidth() - left, fixSize);
+
+        int clipHeight2 = Math.min(inputBitmap.getHeight() - top, fixSize);
+
+        try{
+        	Bitmap bigBm = Bitmap.createBitmap(inputBitmap, left, top, clipWidth2,
+                    clipHeight2, resultMatrix, true);
+            Bitmap clipBm = Bitmap.createBitmap(bigBm, 0, 0, resultWidth,
+                    resultHeight);
+            // 释放掉, 防止内存泄漏
+            bigBm.recycle();
+            // 调用 canvas 绘制完这个view之后, 会直接置顶, 挡住了原本应该在它上面的控件
+            // rectView.drawBitmap(clipBm);
+
+            // 注，这个clipBm即为最终想要的bitmap
+            // 发送设置头像请求
+            setAvatar(clipBm);
+        } catch(IllegalArgumentException e) {
+        	e.printStackTrace();
+        	String msg = Constants.MSG_IMAGE_ERROR;
+            showTips(msg, 1);
+            setSdkResult(Constants.ERROR_PARAM, null, msg, e.getMessage());
+            finishActivity();
+        }
+    }
+
+    /**
+     * 发送设置头像的请求
+     *
+     * @param bitmap
+     */
+    private void setAvatar(Bitmap bitmap) {
+    	QQAvatarImp avator = new QQAvatarImp(mToken);
+    	avator.setAvator(bitmap, mSetAvatarListener);
+    }
+
+    private class QQAvatarImp extends BaseApi {
+		public QQAvatarImp(QQToken token) {
+			super(token);
+		}
+
+		public void setAvator(Bitmap bitmap, IUiListener listener) {
+			Bundle params = composeCGIParams();
+			ByteArrayOutputStream baos = new ByteArrayOutputStream();
+	        bitmap.compress(Bitmap.CompressFormat.JPEG, 40, baos);
+	        byte[] buff = baos.toByteArray();
+	        bitmap.recycle();
+	        TempRequestListener requestListener = new TempRequestListener(listener);
+	        params.putByteArray(AvatarConstants.PARAM_AVATAR_URI, buff);
+	        HttpUtils.requestAsync(mToken, Global.getContext(),
+	                GRAPH_SET_AVATAR, params, Constants.HTTP_POST,
+	                requestListener);
+            OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                    Constants.VIA_SET_AVATAR_SUCCEED, Constants.VIA_REPORT_TYPE_SET_AVATAR,
+                    Constants.VIA_ACT_TYPE_NINETEEN, Constants.VIA_RESULT_SUCCESS);
+		}
+    }
+    /**
+     * 显示一个tips
+     *
+     * @param message
+     * @param type
+     *            tips的图标类型, 0: ic_success 图标, 1: ic_error 图标
+     */
+    private void showTips(final String message, final int type) {
+        mHandler.post(new Runnable() {
+            @Override
+            public void run() {
+                ImageActivity.this.showTipsInUIThread(message, type);
+            }
+        });
+    }
+
+    private void showTipsInUIThread(String message, int type) {
+        Toast toast = Toast.makeText(this, message, Toast.LENGTH_LONG);
+        LinearLayout layout = (LinearLayout) toast.getView();
+        TextView textView = (TextView) layout.getChildAt(0);
+        textView.setPadding(8, 0, 0, 0);
+        ImageView imageView = new ImageView(this);
+        LinearLayout.LayoutParams imageLayoutParams = new LinearLayout.LayoutParams(
+                DensityUtil.dip2px(this, 16), DensityUtil.dip2px(this, 16));
+        imageView.setLayoutParams(imageLayoutParams);
+        if (type == 0) {
+            imageView
+                    .setImageDrawable(getDrawable(AvatarConstants.ICON_SUCCESS_FILE_NAME));
+        } else {
+            imageView
+                    .setImageDrawable(getDrawable(AvatarConstants.ICON_FAILURE_FILE_NAME));
+        }
+        layout.addView(imageView, 0);
+        layout.setOrientation(LinearLayout.HORIZONTAL);
+        layout.setGravity(Gravity.CENTER);
+        toast.setView(layout);
+        toast.setGravity(Gravity.CENTER, 0, 0);
+        toast.show();
+    }
+
+    private void setSdkResult(int error, String response, String msg,
+            String detail) {
+        Intent i = new Intent();
+        i.putExtra(Constants.KEY_ERROR_CODE, error);
+        i.putExtra(Constants.KEY_ERROR_MSG, msg);
+        i.putExtra(Constants.KEY_ERROR_DETAIL, detail);
+        i.putExtra(Constants.KEY_RESPONSE, response);
+        int code = Activity.RESULT_OK;
+        setResult(code, i);
+    }
+
+    private void finishActivity() {
+        finish();
+        if (exitAnim != 0) {
+            overridePendingTransition(0, exitAnim);
+        }
+    }
+
+    /**
+     * 获取用户昵称并显示
+     */
+    private void getUserNick() {
+        getUserNickCount++;
+        UserInfo userInfo = new UserInfo(this, mToken);
+        userInfo.getUserInfo(mGetUserNickListener);
+    }
+
+    /**
+     * 设置用户昵称
+     *
+     * @param nick
+     */
+    private void setUserNick(String nick) {
+        nick = decodeHtml(nick);
+        if (!"".equals(nick)) {
+            userNickTextView.setText(nick);
+            userNickTextView.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private String decodeHtml(String sStr) {
+        sStr = sStr.replaceAll("&gt;", ">");
+        sStr = sStr.replaceAll("&lt;", "<");
+        sStr = sStr.replaceAll("&quot;", "\"");
+        sStr = sStr.replaceAll("&#39;", "'");
+        sStr = sStr.replaceAll("&amp;", "&");
+        return sStr;
+    };
+
+    private final IUiListener mSetAvatarListener = new IUiListener() {
+		@Override
+		public void onError(UiError e) {
+            cancelButton.setEnabled(true);
+            cancelButton.setTextColor(Color.WHITE);
+            okButton.setEnabled(true);
+            okButton.setTextColor(Color.WHITE);
+            okButton.setText(AvatarConstants.RETRY_STRING);
+            progressBar.setVisibility(View.GONE);
+            isRetry = true;
+                // 0 其他错误
+                // -1 表示 json 解析出错
+                // -2 网络错误
+            showTips(e.errorMessage, 1);
+            report("10660", 0);// 设置头像失败
+		}
+
+		@Override
+		public void onComplete(Object obj) {
+			cancelButton.setEnabled(true);
+            cancelButton.setTextColor(Color.WHITE);
+            okButton.setEnabled(true);
+            okButton.setTextColor(Color.WHITE);
+            progressBar.setVisibility(View.GONE);
+            JSONObject response = (JSONObject) obj;
+            int returnCode = -1;
+            try {
+                returnCode = response.getInt("ret");
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            if (returnCode == 0) {
+                showTips(AvatarConstants.SET_AVATAR_SUCCESS_STRING, 0);
+                report("10658", 0);// 成功设置头像
+
+                // sdk via 上报
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                        Constants.VIA_SET_AVATAR_SUCCEED, Constants.VIA_REPORT_TYPE_SET_AVATAR,
+                        Constants.VIA_ACT_TYPE_THREE, Constants.VIA_RESULT_SUCCESS);
+
+                Activity context = ImageActivity.this;
+                if (returnActivity != null && !"".equals(returnActivity)) {
+                    // 如果用户有指定调用后的返回页,则返回
+                    Intent intent = new Intent();
+                    intent.setClassName(context, returnActivity);
+                    ResolveInfo resolveInfo = context.getPackageManager()
+                            .resolveActivity(intent, 0);
+                    if (resolveInfo != null) {
+                        context.startActivity(intent);
+                    }
+                }
+                setSdkResult(0, response.toString(), null, null);
+                finishActivity();
+
+            } else {
+                showTips(AvatarConstants.SET_AVATAR_FAILURE_STRING, 1);
+                OpenSdkStatic.getInstance().reportVia(mToken.getOpenId(), mToken.getAppId(),
+                        Constants.VIA_SET_AVATAR_SUCCEED, Constants.VIA_REPORT_TYPE_SET_AVATAR,
+                        Constants.VIA_ACT_TYPE_NINETEEN, Constants.VIA_RESULT_FAIL);
+            }
+		}
+
+		@Override
+		public void onCancel() {
+		}
+	};
+
+    private final IUiListener mGetUserNickListener = new IUiListener() {
+		@Override
+		public void onError(UiError e) {
+			onFailure(0);
+		}
+
+		@Override
+		public void onComplete(Object obj) {
+			JSONObject response = (JSONObject) obj;
+			int returnCode = -1;
+            try {
+                returnCode = response.getInt("ret");
+                if (returnCode == 0) {
+                    final String nick = response.getString("nickname");
+                    mHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            setUserNick(nick);
+                        }
+                    });
+                    report("10659", 0);// 成功获取用户昵称
+                } else {
+                    report("10661", 0);// 获取用户昵称失败
+                }
+            } catch (JSONException e) {
+                e.printStackTrace();
+            }
+            if (returnCode != 0) {
+                onFailure(returnCode);
+            }
+		}
+
+		@Override
+		public void onCancel() {
+		}
+
+		private void onFailure(int errorCode) {
+            if (getUserNickCount < MAX_GET_USER_NICK_COUNT) {
+                getUserNick();
+            } else {
+                // showTips(AvatarConstants.GET_NICK_FAILURE_STRING, 1);
+            }
+        }
+	};
+
+    public void report(String reportId, long costTime) {
+        Util.reportBernoulli(ImageActivity.this, reportId, costTime, mToken.getAppId());
+    }
+
+}

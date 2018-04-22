@@ -1,0 +1,120 @@
+package com.tencent.open.web.security;
+
+import com.tencent.open.JsBridge;
+import com.tencent.open.log.SLog;
+
+public class SecureJsInterface extends JsBridge.JsHandler {
+
+	private static final String TAG = SLog.TAG + ".SecureJsInterface";
+	public static boolean isPWDEdit = false;
+
+	private String mKey;
+
+	@Override
+	public boolean customCallback() {
+		return true;
+	}
+
+	/**
+	 * 供给JS调用的java方法，返回的是输入的光标的位置
+	 * 
+	 * @param pos
+	 * @return 返回是否插入成功
+	 */
+	public void curPosFromJS(String position) {
+        SLog.d(TAG, "-->curPosFromJS: " + position);
+		Boolean bRet;
+		int pos = -1;
+		try {
+			pos = Integer.parseInt(position);
+		} catch (NumberFormatException e) {
+			SLog.e(TAG, "-->curPosFromJS number format exception.",e);
+			// do nothing
+		}
+		if (pos < 0) {
+			throw new RuntimeException("position is illegal.");
+		}
+
+		/**
+		 * 这里判断是否有退格键，如果有退格键，就不插入，同时，密码字符串buffer中也需要对相应位置的地方置空
+		 */
+		if (CaptureInputConnection.callFlag == false) {
+			// 预留逻辑，出现了监控点中无法获取按键字符的情况下使用
+		}
+
+		if (CaptureInputConnection.BackSpaceflag) {
+			bRet = JniInterface.BackSpaceChar(
+					CaptureInputConnection.BackSpaceflag, pos);
+			if (bRet) {
+				CaptureInputConnection.BackSpaceflag = false;
+			}
+		} else {
+			mKey = CaptureInputConnection.keycode;
+			// 指定的位置插入字符或字符串
+			JniInterface.insetTextToArray(pos, mKey, mKey.length());
+			SLog.v(TAG, "curPosFromJS mKey: " + mKey);
+
+		}
+
+	}
+
+	/***
+	 * 判断光标是否在密码输入框中，建立inputconnection
+	 * 
+	 * @param flag
+	 *            = true 是密码框， flag = false 不在密码框
+	 * @return
+	 */
+	public void isPasswordEdit(String flag) {
+		SLog.i(TAG, "-->is pswd edit, flag: " + flag);
+		int f = -1;
+		try {
+			f = Integer.parseInt(flag);
+		} catch (Exception e) {
+			SLog.e(TAG, "-->is pswd edit exception: " + e.getMessage());
+		}
+        if (!(f == 0 || f == 1)) {
+			throw new RuntimeException("is pswd edit flag is illegal.");
+		}
+		if (f == 0) {
+			isPWDEdit = false;
+		} else if (f == 1) {
+			isPWDEdit = true;
+		}
+	}
+
+	/**
+	 * 判断用户是否点击清空输入法按钮，清空所有输入
+	 * 
+	 * @return
+	 */
+	public void clearAllEdit() {
+		SLog.i(TAG, "-->clear all edit.");
+		try {
+			JniInterface.clearAllPWD();
+		} catch (Exception e) {
+			SLog.e(TAG, "-->clear all edit exception: " + e.getMessage());
+			throw new RuntimeException(e);
+		}
+
+	}
+
+	/***
+	 * 从native层获取计算MD5
+	 * 
+	 * @return 返回MD5,传给H5
+	 */
+	public String getMD5FromNative() {
+		SLog.i(TAG, "-->get md5 form native");
+		String md5 = "";
+		try {
+			md5 = JniInterface.getPWDKeyToMD5(null);
+		} catch (Exception e) {
+			SLog.e(TAG, "-->get md5 form native exception: " + e.getMessage());
+			throw new RuntimeException(e);
+		}
+		SLog.v(TAG, "-->getMD5FromNative, MD5= " + md5);
+		
+		return md5;
+	}
+}

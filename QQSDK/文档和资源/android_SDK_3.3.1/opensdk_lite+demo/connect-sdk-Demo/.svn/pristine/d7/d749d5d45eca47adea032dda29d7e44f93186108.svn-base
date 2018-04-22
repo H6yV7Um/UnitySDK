@@ -1,0 +1,145 @@
+
+package com.tencent.connect.mta;
+
+import java.lang.reflect.Method;
+import android.content.Context;
+
+import com.tencent.connect.auth.QQToken;
+import com.tencent.open.utils.OpenConfig;
+
+/**
+ * 把非业务统计封装在一起统一管理
+ * 
+ * @author azraellong
+ */
+public class TencentStat {
+
+	private static final String REPORT_URL = "http://cgi.connect.qq.com/qqconnectutil/sdk";
+	
+	private static Class<?> statConfigClass = null;
+	private static Class<?> statServiceClass = null;
+	
+	/*mta统计的反射方法*/
+	private static Method methodReportQQ = null;
+	private static Method methodTrackCustomEvent = null;
+	private static Method methodCommitEvents = null;
+	private static Method methodEnableStatService = null;
+	
+	private static boolean isMtaOk = false;
+
+    public static boolean isStatEnable(Context context, QQToken token) {
+        boolean status = OpenConfig.getInstance(context, token.getAppId())
+                .getBoolean("Common_ta_enable");
+       // SLog.v("OpenConfig", "get statenable: " + status);
+        return status;
+    }
+
+    public static void checkStatStatus(Context context, QQToken token) {    	
+    	try {
+    		if (isStatEnable(context, token)) {
+            	methodEnableStatService.invoke(statConfigClass, true);
+            } else {
+            	methodEnableStatService.invoke(statConfigClass, false);
+            }
+    	} catch (Exception e) {
+    		e.printStackTrace();
+    	}     
+    }
+
+    //反射检测mta是否存在，如果存在，则上报一次，唤起mta。否则不上报
+    public static void start4QQConnect(Context context, QQToken token) {
+	    String appid  = token.getAppId();
+	    String appkey = "Aqc" + appid;			  // appkey加上互联的前缀
+	    
+	    try {
+	    	statConfigClass = Class.forName("com.tencent.stat.StatConfig");
+	    	statServiceClass = Class.forName("com.tencent.stat.StatService");
+	    	
+	    	/*获取反射方法*/
+	    	methodReportQQ = statServiceClass.getMethod("reportQQ", Context.class, String.class);
+	    	methodTrackCustomEvent = statServiceClass.getMethod("trackCustomEvent", Context.class, String.class, String[].class);
+	    	methodCommitEvents = statServiceClass.getMethod("commitEvents", Context.class, int.class);
+	    	methodEnableStatService = statConfigClass.getMethod("setEnableStatService", boolean.class);
+	    	
+	    	checkStatStatus(context, token);
+	    	
+	    	// 禁止捕获app未处理的异常
+	    	statConfigClass.getMethod("setAutoExceptionCaught", boolean.class)
+	    		.invoke(statConfigClass, false);	  
+	    	
+	    	// 开户WIFI网络实时上报
+	    	statConfigClass.getMethod("setEnableSmartReporting", boolean.class)
+	    		.invoke(statConfigClass, true); 
+	    	
+	    	// PERIOD间隔周期，24小时
+	    	statConfigClass.getMethod("setSendPeriodMinutes", int.class)
+	    		.invoke(statConfigClass, 24 * 60); 
+	    	
+	    	// PERIOD上报策略，相隔24小时上报一次
+	    	Class<?> statReportStrategyClass = Class.forName("com.tencent.stat.StatReportStrategy");
+	    	statConfigClass.getMethod("setStatSendStrategy", statReportStrategyClass).invoke(
+	    			statConfigClass,
+	    			statReportStrategyClass.getField("PERIOD").get(null)
+	    	);	    		    	
+	    	
+            // updated by hamlingong 将数据统计上报到默认的地址(腾讯云分析MTA)。
+            // 修改上报的url为互联的
+            // statConfigClass.getMethod("setStatReportUrl", String.class)
+            //	.invoke(statConfigClass, REPORT_URL);
+	    	
+	    	//初始化
+	    	statServiceClass.getMethod("startStatService", Context.class, String.class, String.class)
+	    		.invoke(
+	    			statServiceClass, 
+	    			context, 
+	    			appkey, 
+	    			Class.forName("com.tencent.stat.common.StatConstants").getField("VERSION").get(null)
+	    		 );
+	    	isMtaOk = true;    	
+	    } catch (Exception e) {
+	    	e.printStackTrace();
+	    }
+    }
+
+    public static void reportQQ(Context context, QQToken token) {
+    	if (!isMtaOk) {
+    		return;
+    	}
+    	
+        checkStatStatus(context, token);
+        if(null != token.getOpenId()){
+        	try {
+        		methodReportQQ.invoke(statServiceClass, context, token.getOpenId());
+        	} catch (Exception e) {
+        		e.printStackTrace();
+        	}      	
+        }
+    }
+
+    public static void trackCustomEvent(Context context, QQToken token, String eventId,
+            String... args) {
+    	if (!isMtaOk) {
+    		return;
+    	}
+    	
+        checkStatStatus(context, token);
+        try {
+        	 methodTrackCustomEvent.invoke(statServiceClass, context, eventId, args);
+        } catch (Exception e) {
+        	e.printStackTrace();
+        }     
+    }
+
+    public static void commitEvents(Context context, QQToken token, int maxNumber) {
+    	if (!isMtaOk) {
+    		return;
+    	}
+    	
+        checkStatStatus(context, token);
+        try {
+        	methodCommitEvents.invoke(statServiceClass, context, maxNumber);
+        } catch (Exception e) {
+        	e.printStackTrace();
+        }    
+    }
+}

@@ -1,0 +1,10 @@
+[
+    {
+        "merged": "D:\\svn-project\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\menu\\activity_return.xml",
+        "source": "D:\\svn-project\\connect-sdk-Demo\\sample\\res\\menu\\activity_return.xml"
+    },
+    {
+        "merged": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\build\\intermediates\\res\\merged\\debug\\menu\\activity_return.xml",
+        "source": "D:\\svn-project\\opensdk_lite+demo\\connect-sdk-Demo\\sample\\res\\menu\\activity_return.xml"
+    }
+]

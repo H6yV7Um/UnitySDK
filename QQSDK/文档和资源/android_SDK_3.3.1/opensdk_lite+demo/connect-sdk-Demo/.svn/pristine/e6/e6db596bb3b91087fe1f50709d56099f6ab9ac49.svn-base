@@ -1,0 +1,185 @@
+package com.tencent.open.yyb;
+
+import java.io.IOException;
+import java.io.InputStream;
+
+import org.apache.http.client.methods.HttpGet;
+import org.json.JSONObject;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.open.utils.Util.Statistic;
+
+import android.content.Context;
+import android.content.res.AssetManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.NinePatchDrawable;
+import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Bundle;
+import android.text.TextUtils;
+import android.webkit.CookieManager;
+import android.webkit.CookieSyncManager;
+
+public class AppbarUtil {
+
+	private static final String TAG = SLog.TAG + ".AppbarUtil";
+	protected static final String CGI_REPORT_VIA = "http://analy.qq.com/cgi-bin/mapp_apptrace";
+
+
+	/**
+	 * 将cookie同步到webview中去。
+	 *
+	 * @param context
+	 * @param url
+	 * @param authKeyType
+	 */
+	public static void synCookies(Context context, String url, String openid, String accesstoken, String appid) {
+		if (TextUtils.isEmpty(url)) {
+			return;
+		}
+		CookieSyncManager.createInstance(context);
+		CookieManager cookieManager = CookieManager.getInstance();
+		cookieManager.setAcceptCookie(true);
+
+		Uri uri = Uri.parse(url);
+		String host = uri.getHost().toLowerCase();
+		String cookieDomain = null;
+		if (host.endsWith(".qq.com")) {
+			cookieDomain = ".qq.com";
+		}
+
+		/*cookieManager.setCookie(url, getSetCookieSring("logintype", "SSO", cookieDomain));
+		cookieManager.setCookie(url, getSetCookieSring("openid", openid, cookieDomain));
+		cookieManager.setCookie(url, getSetCookieSring("accesstoken", accesstoken, cookieDomain));*/
+
+		cookieManager.setCookie(url, getSetCookieSring("logintype", "MOBILEQ", cookieDomain));
+		cookieManager.setCookie(url, getSetCookieSring("qopenid", openid, cookieDomain));
+		cookieManager.setCookie(url, getSetCookieSring("qaccesstoken", accesstoken, cookieDomain));
+		cookieManager.setCookie(url, getSetCookieSring("openappid", appid, cookieDomain));
+
+		CookieSyncManager.getInstance().sync();
+	}
+
+	public static void saveUserFit(Context context, String url,int flag){
+		saveCookie(context, url, "userfit", flag+"");
+	}
+	/**这个不要多次调用*/
+	public static void saveCookie(Context context, String url,String key,String value){
+		if (TextUtils.isEmpty(url)) {
+			return;
+		}
+		CookieSyncManager.createInstance(context);
+		CookieManager cookieManager = CookieManager.getInstance();
+		cookieManager.setAcceptCookie(true);
+		Uri uri = Uri.parse(url);
+		String host = uri.getHost().toLowerCase();
+		String cookieDomain = null;
+		if (host.endsWith(".qq.com")) {
+			cookieDomain = ".qq.com";
+		}
+		cookieManager.setCookie(url, getSetCookieSring(key, value, cookieDomain));
+		CookieSyncManager.getInstance().sync();
+	}
+	private static String getSetCookieSring(String name, String value, String domain) {
+		String v = name + "=" + value;
+		if (domain != null) {
+			v += "; path=/";
+			v += "; domain=" + domain;
+		}
+		return v;
+	}
+
+	public static class CookieInfo{
+		public String openId;
+		public String accessToken;
+		public long openAppid;
+	}
+
+	public static Drawable getDrawable(String fileName, Context context) {
+		return getDrawable(fileName, context, new Rect(0, 0, 0, 0));
+	}
+
+	public static Drawable getDrawable(String fileName, Context context, Rect ninePatchRect) {
+		context = context.getApplicationContext();
+		AssetManager assetManager = context.getAssets();
+
+		Drawable drawable = null;
+		InputStream inputStream = null;
+		try {
+			inputStream = assetManager.open(fileName);
+			if (inputStream == null) {
+				return null;
+			}
+			if (fileName.endsWith(".9.png")) {
+				Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+				if (bitmap != null) {
+					byte[] chunk = bitmap.getNinePatchChunk();
+					NinePatchDrawable patchy = new NinePatchDrawable(context.getResources(), bitmap,
+							chunk, ninePatchRect, null);
+					drawable = patchy;
+				} else {
+					return null;
+				}
+			} else {
+				drawable = Drawable.createFromStream(inputStream, fileName);
+			}
+		} catch (OutOfMemoryError e) {
+            e.printStackTrace();
+            SLog.e(TAG, "-->(AppbarUtil)getDrawable : OutOfMemoryError",e);
+		} catch (IOException e) {
+			e.printStackTrace();
+			SLog.e(TAG, "-->(AppbarUtil)getDrawable : IOException",e);
+		} finally {
+			if (inputStream != null) {
+				try {
+					inputStream.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+					SLog.e(TAG, "-->(AppbarUtil)getDrawable : IOException",e);
+				}
+			}
+		}
+		return drawable;
+	}
+
+	public static void reportForVia(String appid, String actionType, String via) {
+		Bundle params = new Bundle();
+		params.putString("uin", "1000");
+		params.putString("action", actionType);
+		params.putString("appid", appid);
+		params.putString("via", via);
+		new ViaAsyncTask().execute(params);
+	}
+
+	private static class ViaAsyncTask extends AsyncTask<Bundle, Void, Void> {
+
+		@Override
+		protected Void doInBackground(Bundle... params) {
+			if (params == null) {
+				return null;
+			}
+			String uri = CGI_REPORT_VIA;
+            if (params.length == 2) {
+                String strUri = params[1].getString("uri");
+                if (!TextUtils.isEmpty(strUri)) {
+                    uri = strUri;
+                }
+            }
+
+			try {
+				Statistic statistic = HttpUtils.openUrl2(null, uri, HttpGet.METHOD_NAME, params[0]);
+				JSONObject obj = Util.parseJson(statistic.response);
+				int ret = obj.getInt("ret");
+				SLog.d(TAG, "-->(ViaAsyncTask)doInBackground : ret = " + ret);
+			} catch (Exception e) {
+				SLog.e(TAG, "-->(ViaAsyncTask)doInBackground : Exception = ",e);
+				e.printStackTrace();
+			}
+			return null;
+		}
+	}
+}

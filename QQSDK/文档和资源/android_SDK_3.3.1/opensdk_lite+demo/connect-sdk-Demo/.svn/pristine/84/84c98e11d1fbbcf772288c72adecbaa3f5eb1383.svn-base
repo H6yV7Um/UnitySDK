@@ -1,0 +1,116 @@
+/**
+ * Name : Base.java <br>
+ * Copyright : Copyright (c) Tencent Inc. All rights reserved. <br>
+ * Description : Like "System" class in Java <br>
+ *
+ */
+package com.tencent.open.utils;
+
+import java.io.File;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager.NameNotFoundException;
+
+/**
+ * 全局运行时环境<br>
+ * <br>
+ * 该类静态包装了{@link android.content.ContextWrapper}的全部方法，可以在不存在或者不方便传递
+ * {@code Context} 的情况下使用当前的{@code Application}作为{@code Context}<br>
+ *
+ * <pre>
+ * e.g.
+ *
+ * public boolean updateNetworkInfo()
+ * {
+ * 	#//获得Android连通性服务实例
+ * 	ConnectivityManager manager = (ConnectivityManager) Global.getSystemService(Context.CONNECTIVITY_SERVICE);
+ *
+ * 	NetworkInfo info = manager.getActiveNetworkInfo();
+ * }
+ * </pre>
+ *
+ * ① 若没有自定义{@code Application}的需要，请在AndroidManifest.xml中设定其 android:name
+ * 属性为com.tencent.base.BaseApplication<br>
+ * <br>
+ * ② 若已经使用其他的{@code Application}的子类作为自己的Application，请在使用BASE库之前， 在其
+ * {@code Application.onCreate()} 方法中调用 {@code Global.init(Application)} <br>
+ * <br>
+ * 若没有初始化{@code Global}，使用本类的静态方法会得到{@link BaseLibException} 的运行时异常，请检查
+ * {@Application}的初始化代码或AndroidManifest.xml中的声明
+ *
+ * @author lewistian
+ *
+ */
+public final class Global
+{
+	private static final String SHARE_PREF_NAME = "openSdk.pref";
+	private static final String KEY_APP_VERSIONCODE = "app.vercode";
+    private static Context context;
+
+    public final static Context getContext()
+    {
+        if (context == null)
+        {
+            return null;
+        }
+
+        return context;
+    }
+
+    public final static void setContext(Context context)
+    {
+        Global.context = context;
+    }
+
+    public final static String getPackageName()
+    {
+        if (null == getContext()) {
+            return "";
+        }
+        return getContext().getPackageName();
+    }
+
+    public final static SharedPreferences getSharedPreferences(String name, int mode)
+    {
+        if (null == getContext()) {
+            return null;
+        }
+        return getContext().getSharedPreferences(name, mode);
+    }
+
+    public final static File getFilesDir()
+    {
+        if (null == getContext()) {
+            return null;
+        }
+        return getContext().getFilesDir();
+    }
+    
+    public static void saveVersionCode() {
+    	Context context = getContext();
+    	if (null == context) {
+            return;
+        }
+    	
+    	try {
+			PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+			if (info != null) {
+				SharedPreferences share = context.getSharedPreferences(SHARE_PREF_NAME, 0);
+				Editor editor = share.edit();
+				editor.putInt(KEY_APP_VERSIONCODE, info.versionCode);
+				editor.commit();
+			}
+		} catch (NameNotFoundException e) {
+			e.printStackTrace();
+		}
+    }
+    
+    public static int getVersionCode() {
+    	SharedPreferences share = context.getSharedPreferences(SHARE_PREF_NAME, 0);
+    	return share.getInt(KEY_APP_VERSIONCODE, 0);
+    }
+
+
+}

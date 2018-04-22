@@ -1,0 +1,87 @@
+package com.tencent.open.web.security;
+
+import java.io.UnsupportedEncodingException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+import android.net.Uri;
+import android.text.TextUtils;
+import android.webkit.WebView;
+
+import com.tencent.open.JsBridge;
+import com.tencent.open.log.SLog;
+
+public class SecureJsBridge extends JsBridge {
+	private static final String TAG = SLog.TAG + ".SecureJsBridge";
+	
+	@Override
+	public void getResult(String objName, String methodName, List<String> args,
+			final JsBridgeListener listener) {
+        SLog.v(TAG, "-->getResult, objectName: " + objName + " | methodName: " + methodName);
+		// decode url
+		for (int i = 0, l = args.size(); i < l; i++) {
+			try {
+				args.set(i, java.net.URLDecoder.decode(args.get(i), "UTF-8"));// url decode
+			} catch (UnsupportedEncodingException e) {
+				e.printStackTrace();
+			}
+		}
+		JsHandler handler = jsHandlers.get(objName);
+		if (handler != null) {
+			// 存在对应的handler，由handler处理
+			SLog.d(TAG, "-->handler != null");
+			handler.call(methodName, args, listener);
+		} else {
+			SLog.d(TAG, "-->handler == null");
+			// 未找到handler ，回调告知无此API
+			if (listener != null) {
+				listener.onNoMatchMethod();
+			}
+		}
+	}
+	
+	@Override
+	public boolean canHandleUrl(WebView webView, String url) {
+		// jsbridge://objname/method/sn/arg0/arg1/arg2 移除到只剩method及后续的arg
+		SLog.v(TAG, "-->canHandleUrl---url = " + url);
+		if (url == null) {
+			return false;
+		}
+		final Uri uri = Uri.parse(url);
+		if (!uri.getScheme().equals("jsbridge")) {
+			return false;
+		}
+
+		String[] paths = (url + "/#").split("/");
+		ArrayList<String> pathArrayList = new ArrayList<String>(
+				Arrays.asList(paths));
+		if (pathArrayList.size() < 7) {
+			return false;
+		}
+		// jsbridge://objname/method/sn/callback/arg0/arg1 移除到只剩method及后续的arg
+		String objectName = pathArrayList.get(2);
+		String methodName = pathArrayList.get(3);
+		String snStr = pathArrayList.get(4);
+		String callback = pathArrayList.get(5);
+		SLog.v(TAG, "-->canHandleUrl, objectName: " + objectName + " | methodName: " + methodName + " | snStr: " + snStr);
+		
+		if (TextUtils.isEmpty(objectName) || TextUtils.isEmpty(methodName) || TextUtils.isEmpty(snStr)) {
+			return false;
+		}
+		long sn;
+        try{
+            sn = Long.parseLong(snStr);
+        }catch (Exception e){
+            // do nothing
+            return false;
+        }
+		
+		SecureJsListener listener = new SecureJsListener(webView, sn, url, callback);
+		
+		final List<String> args = pathArrayList.subList(6, pathArrayList.size()-1);
+		getResult(objectName, methodName, args, listener);
+		return true;
+	}
+
+}

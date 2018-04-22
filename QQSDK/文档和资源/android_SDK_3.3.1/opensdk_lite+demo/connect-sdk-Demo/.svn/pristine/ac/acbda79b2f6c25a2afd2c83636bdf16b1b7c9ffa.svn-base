@@ -1,0 +1,277 @@
+package com.tencent.open.report;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+
+import android.content.ContentValues;
+import android.content.Context;
+import android.database.Cursor;
+import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteOpenHelper;
+import android.text.TextUtils;
+
+/**
+ * 将业务数据序列化以后，以流的形式保存在数据库
+ * 
+ * @author hamlingong
+ *
+ */
+public class ReportDatabaseHelper extends SQLiteOpenHelper {
+
+	private static final String TAG = SLog.TAG + ".ReportDatabaseHelper";
+    protected static final String DATABASE_NAME = "sdk_report.db";
+	protected static final String TABLE_NAME = "via_cgi_report";
+	private static final int DATABASE_VERSION = 2;
+
+	protected static final String COL_KEY = "key";
+	//具体的上报类型，ReportCenter里的REPORT_CGI和REPORT_VIA
+	protected static final String COL_TYPE = "type";
+	protected static final String COL_BLOB = "blob";
+
+    // 设置保存到DB的数据最大上限为20，超过一百就丢掉。主要防止一直上报失败，数据会越来越大的情况。
+    protected static final int REPORT_MAX_DB_SIZE = 20;
+
+	protected static final String[] COLS_SIZE = new String[] { COL_KEY };
+
+	protected static ReportDatabaseHelper sInstance;
+
+	public static synchronized ReportDatabaseHelper getInstance() {
+		if (sInstance == null) {
+            sInstance = new ReportDatabaseHelper(Global.getContext());
+		}
+
+		return sInstance;
+	}
+
+	public ReportDatabaseHelper(Context context) {
+		super(context, DATABASE_NAME,null, DATABASE_VERSION);
+	}
+
+	@Override
+	public void onCreate(SQLiteDatabase db) {
+		db.execSQL("CREATE TABLE IF NOT EXISTS " + TABLE_NAME +
+				"( _id INTEGER PRIMARY KEY," +
+				COL_KEY + " TEXT," +
+				COL_TYPE + " TEXT," +
+				COL_BLOB + " BLOB);");
+	}
+
+	@Override
+	public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
+		db.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
+		onCreate(db);
+	}
+
+	/**
+	 * 返回当前类型的item列表
+	 * @param type 上报类型，ReportCenter里的REPORT_CGI和REPORT_VIA
+	 * @return
+	 */
+	public synchronized List<Serializable> getReportItemFromDB(String type) {
+        List<Serializable> result = Collections.synchronizedList(new ArrayList<Serializable>());
+
+        if (TextUtils.isEmpty(type)) {
+            return result;
+        }
+		SQLiteDatabase db = getReadableDatabase();
+        if (db == null) {
+            return result;
+        }
+
+		Cursor cursor = null;
+		ObjectInputStream ois = null;
+		try {
+			cursor = db.query(TABLE_NAME, null, COL_TYPE + " = ?", new String[] { type }, null, null, null);
+			if (cursor != null && cursor.getCount() > 0) {
+				cursor.moveToFirst();
+				do {
+					byte[] bs = cursor.getBlob(cursor.getColumnIndex(COL_BLOB));
+
+					ByteArrayInputStream bais = new ByteArrayInputStream(bs);
+					ObjectInputStream in = null;
+
+					Serializable serializable = null;
+					try {
+						// stream closed in the finally
+						in = new ObjectInputStream(bais);
+						serializable = (Serializable) in.readObject();
+					} catch (Exception ex) {
+					} finally {
+						try {
+							if (in != null) {
+								in.close();
+							}
+						} catch (IOException ex) { // NOPMD
+							// ignore close exception
+						}
+						try {
+							bais.close();
+						} catch (IOException e) {
+							// ignore close exception
+						}
+					}
+					if (serializable != null) {
+                        result.add(serializable);
+                    }
+				} while(cursor.moveToNext());
+			}
+        } catch (Exception e) {
+            SLog.e(TAG, "getReportItemFromDB has exception.",e);
+        } finally {
+			if (cursor != null) {
+				cursor.close();
+			}
+			if (ois != null) {
+				try {
+					ois.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+            if (null != db) {
+			    db.close();
+			}
+		}
+		return result;
+	}
+
+	/**
+	 * 获取指定类型的上报条数
+	 * @param type 上报类型，ReportCenter里的REPORT_CGI和REPORT_VIA
+	 * @return
+	 */
+	public synchronized int getReportSize(String type) {
+		int result = 0;
+        if (TextUtils.isEmpty(type)) {
+            return result;
+        }
+		SQLiteDatabase db = getReadableDatabase();
+        if (db == null) {
+            return result;
+        }
+
+		Cursor cursor = null;
+		try {
+			cursor = db.query(TABLE_NAME, COLS_SIZE, COL_TYPE + " = ?", new String[] { type }, null, null, null);
+			if (cursor != null) {
+				result = cursor.getCount();
+			}
+        } catch (Exception e) {
+            SLog.e(TAG, "getReportSize has exception.",e);
+        } finally {
+			if (cursor != null) {
+				cursor.close();
+			}
+            if (null != db) {
+                db.close();
+            }
+		}
+
+		return result;
+	}
+
+	/**
+	 * 保存指定类型的上报数据保存到数据库
+	 * @param type 上报类型，ReportCenter里的REPORT_CGI和REPORT_VIA
+	 * @param list 上报的条数
+	 */
+	public synchronized void saveReportItemToDB(String type, List<Serializable> list) {
+        int length = list.size();
+        if (length == 0) {
+            return;
+        }
+        // 如果list中的数据size比阀值还大，就取阀值，否则保存list值。
+        length = (length <= REPORT_MAX_DB_SIZE) ? length : REPORT_MAX_DB_SIZE;
+
+        if (TextUtils.isEmpty(type)) {
+            return;
+        }
+
+        // 保存新的上报数据之前，先清除之前的老数据，防止产生大量的数据。
+		clearReportItem(type);
+		SQLiteDatabase db = getWritableDatabase();
+        if (db == null) {
+            return;
+        }
+
+		db.beginTransaction();
+		try {
+			ContentValues values = new ContentValues();
+            for (int i = 0; i < length; i++) {
+                Serializable item = list.get(i);
+				if (item != null) {
+					values.put(COL_TYPE, type);
+
+					ByteArrayOutputStream baos = new ByteArrayOutputStream(512);
+					ObjectOutputStream out = null;
+					try {
+						out = new ObjectOutputStream(baos);
+						out.writeObject(item);
+					} catch (IOException ex) {
+					} finally {
+						try {
+							if (out != null) {
+								out.close();
+							}
+						} catch (IOException ex) { // NOPMD
+							// ignore close exception
+						}
+						try {
+							baos.close();
+						} catch (IOException e) {
+							// ignore close exception
+						}
+					}
+					values.put(COL_BLOB, baos.toByteArray());
+					db.insert(TABLE_NAME, null, values);
+				}
+
+				values.clear();
+			}
+			db.setTransactionSuccessful();
+        } catch (Exception e) {
+            SLog.e(TAG, "saveReportItemToDB has exception.");
+        } finally {
+			db.endTransaction();
+            if (null != db) {
+                db.close();
+            }
+		}
+
+	}
+
+    /**
+     * 根据type删除数据库中的数据
+     * 
+     * @param type
+     */
+	public synchronized void clearReportItem(String type) {
+        if (TextUtils.isEmpty(type)) {
+            return;
+        }
+        SQLiteDatabase db = getWritableDatabase();
+        if (db == null) {
+            return;
+        }
+
+		try {
+		    db.delete(TABLE_NAME, COL_TYPE + " = ?", new String[] { type });    
+        } catch (Exception e) {
+            SLog.e(TAG, "clearReportItem has exception.",e);
+        } finally {
+            if (null != db) {
+                db.close();
+            }
+		}
+	}
+}

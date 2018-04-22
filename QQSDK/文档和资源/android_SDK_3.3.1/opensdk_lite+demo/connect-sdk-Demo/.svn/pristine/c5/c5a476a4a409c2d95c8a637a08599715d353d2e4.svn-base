@@ -1,0 +1,185 @@
+package com.tencent.open.qzone;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.connect.common.BaseApi;
+import com.tencent.connect.common.Constants;
+import com.tencent.tauth.IUiListener;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+
+import android.content.Context;
+import android.os.Bundle;
+
+public class Albums extends BaseApi {
+	private static final String PICTURE = "picture";
+	private static final String PHOTODESC = "photodesc";
+	private static final String PIC_NAME = "title";
+	private static final String ALBUM_ID = "albumid";
+	private static final String LONGTITUDE = "x";
+	private static final String LATITUDE = "y";
+	private static final String ALBUM_NAME = "albumname";
+	private static final String ALBUM_DESC = "albumdesc";
+	private static final String PRIV = "priv";
+	private static final String ALBUM_QUESTION = "question";
+	private static final String ALBUM_ANSWER = "answer";
+	
+	private static final String GRAPH_LIST_ALBUM = "photo/list_album";
+	private static final String GRAPH_LIST_PHOTO = "photo/list_photo";
+	private static final String GRAPH_ADD_ALBUM = "photo/add_album";
+    private static final String GRAPH_UPLOAD_PIC = "photo/upload_pic";
+    
+	public enum AlbumSecurity {
+		publicToAll("1"),
+		privateOnly("2"),
+		friendsOnly("4"),
+		needQuestion("5");
+		
+		private final String mSecurity;
+		private AlbumSecurity(String security) {
+			mSecurity = security;
+		}
+		
+		public String getSecurity() {
+			return mSecurity;
+		}
+	}
+	
+	public Albums(Context context, QQAuth qqAuth, QQToken token) {
+		super(qqAuth, token);
+	}
+
+	public Albums(Context context, QQToken token) {
+		super(token);
+	}
+
+	/**
+	 * get user's album list.
+	 * @param listener
+	 * @param id
+	 * 					this object will be send back at listener callback, it can be use to identify
+	 * 					the caller, can be null if don't care the caller.
+	 */
+	public void listAlbum(IUiListener listener) {
+		Bundle params = composeCGIParams();
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_LIST_ALBUM, 
+				params, Constants.HTTP_GET, requestListener);
+	}
+	
+	/**
+	 * 
+	 * @param albumId
+	 * 					album id
+	 * @param listener
+	 * @param id
+	 * 						this object will be send back at listener callback, it can be use to identify
+	 * 					the caller, can be null if don't care the caller.
+	 */
+	 
+	public void listPhotos(String albumId, IUiListener listener) {
+		Bundle params = composeCGIParams();
+		params.putString(ALBUM_ID, albumId == null ? "" : albumId);
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_LIST_PHOTO, 
+				params, Constants.HTTP_GET, requestListener);
+	}
+	
+	/**
+	 * 	upload picture to album
+	 * @param filePath	
+	 *						file path
+	 * @param description
+	 * 						file description
+	 * @param albumId
+	 * 						album id, if null will upload to default album.
+	 * @param longtitude
+	 * @param latitude
+	 * @param id
+	 *                      this object will be send back at listener callback, it can be use to identify
+	 * 					the caller, can be null if don't care the caller.
+	 */
+	public void uploadPicture(String filePath, String description, String albumId, 
+			String longtitude, String latitude, IUiListener listener) {
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		byte[] buff = null;
+		InputStream is = null;
+		ByteArrayOutputStream outSteam = null;
+        try {
+        	is = new FileInputStream(filePath);
+            outSteam = new ByteArrayOutputStream();
+            byte[] buffer = new byte[1024];
+            int len = 0;
+            while ((len = is.read(buffer)) != -1) {
+                outSteam.write(buffer, 0, len);
+            }
+            buff = outSteam.toByteArray();
+        } catch (IOException e) {
+        	requestListener.onIOException(e);
+        	return;
+        } finally {
+        	if (outSteam != null) {
+        		try {
+					outSteam.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+        		outSteam = null;
+        	}
+        	if (is != null) {
+        		try {
+					is.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+				is = null;
+        	}
+        }
+        
+        Bundle params = composeCGIParams();
+        File file = new File(filePath);
+       
+        params.putByteArray(PICTURE, buff);// 必须.上传照片的文件名以及图片的内容（在发送请求时，图片内容以二进制数据流的形式发送，见下面的请求示例），注意照片名称不能超过30个字符。
+        params.putString(PHOTODESC, description == null ? "" : description);// 照片描述，注意照片描述不能超过200个字符。
+        params.putString(PIC_NAME, file.getName());// 照片的命名，必须以.jpg,
+        if (albumId != null) {
+        	params.putString(ALBUM_ID,  albumId == null ? "" : albumId);//相册id，不填则传到默认相册
+        }
+        params.putString(LONGTITUDE, longtitude == null ? "" : longtitude);// 照片拍摄时的地理位置的经度。请使用原始数据（纯经纬度，0-360）。
+        params.putString(LATITUDE, latitude == null ? "" : latitude);// 照片拍摄时的地理位置的纬度。请使用原始数据（纯经纬度，0-360）。
+        
+        HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_UPLOAD_PIC, 
+				params, Constants.HTTP_POST, requestListener);
+	}
+	
+	/**
+	 * 
+	 * @param albumName
+	 * @param albumDestription
+	 * @param security
+	 * @param question
+	 * @param answer
+	 * @param listener
+	 * @param id
+	 */
+	public void addAlbum(String albumName, String albumDestription, AlbumSecurity security,
+			String question, String answer,
+			IUiListener listener) {
+		Bundle params = composeCGIParams();
+		params.putString(ALBUM_NAME, albumName == null ? "" : albumName);
+		params.putString(ALBUM_DESC, albumDestription == null ? "" : albumDestription);
+		params.putString(PRIV, security == null ? AlbumSecurity.publicToAll.getSecurity() : security.getSecurity());
+		params.putString(ALBUM_QUESTION, question == null ? "" : question);
+		params.putString(ALBUM_ANSWER, answer == null ? "" : answer);
+		TempRequestListener requestListener = new TempRequestListener(listener);
+		HttpUtils.requestAsync(mToken, Global.getContext(), GRAPH_ADD_ALBUM, 
+				params, Constants.HTTP_POST, requestListener);
+	}
+}

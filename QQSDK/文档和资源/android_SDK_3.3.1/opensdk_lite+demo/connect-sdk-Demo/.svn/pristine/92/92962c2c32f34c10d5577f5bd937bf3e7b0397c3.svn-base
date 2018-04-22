@@ -1,0 +1,53 @@
+
+package com.tencent.connect.avatar;
+
+public class AvatarConstants {
+    /**
+     * 最终发请求时, 会将图片(宽高)压缩或拉伸到这个大小
+     */
+    public static final int AVATAR_SIZE = 640;
+
+    /**
+     * 遮罩背景中, 白框的大小(宽高), 可以跟头像大小不一致
+     */
+    public static final int MAX_MASK_SIZE = AVATAR_SIZE;
+
+    /**
+     * 原图片的最大宽高, 防止加载过大图片到内存时导致的内存溢出
+     */
+    public static final int MAX_SOURCE_SIZE = 2048;
+
+    /**
+     * 编辑器上面的工具栏的高度, 单位是 dp
+     */
+    public static final int TOPBAR_HEIGHT = 80;
+
+    /**
+     * 编辑器下面的工具栏的高度, 单位是 dp
+     */
+    public static final int TOOLBAR_HEIGHT = 60;
+
+    public static final String CANCEL_STRING = "取消";
+    public static final String OK_STRING = "选取";
+    public static final String RETRY_STRING = "重试";
+    public static final String ACTOIN_TIPS_STRING = "移动和缩放";
+    public static final String SET_AVATAR_SUCCESS_STRING = "设置成功";
+    public static final String SET_AVATAR_FAILURE_STRING = "设置出错了，请重新登录再尝试下呢：）";
+    public static final String SET_AVATAR_TIMEOUT_STRING = "网络有问题呢，检查一下网络再重试吧：）";
+    public static final String GET_NICK_FAILURE_STRING = "获取昵称失败，授权失效了吧？";
+
+    public static final String LOGO_FILE_NAME = "com.tencent.plus.logo.png";
+    public static final String TOOLBAR_BG_FILE_NAME = "com.tencent.plus.bar.png";
+    public static final String ICON_SUCCESS_FILE_NAME = "com.tencent.plus.ic_success.png";
+    public static final String ICON_FAILURE_FILE_NAME = "com.tencent.plus.ic_error.png";
+
+    public static final String BUTTON_BLUE_FILE_NAME = "com.tencent.plus.blue_normal.png";
+    public static final String BUTTON_BLUE_PRESS_FILE_NAME = "com.tencent.plus.blue_down.png";
+    public static final String BUTTON_BLUE_DISABLE_NAME = "com.tencent.plus.blue_disable.png";
+
+    public static final String BUTTON_GRAY_FILE_NAME = "com.tencent.plus.gray_normal.png";
+    public static final String BUTTON_GRAY_PRESS_FILE_NAME = "com.tencent.plus.gray_down.png";
+    public static final String BUTTON_GRAY_DISABLE_NAME = "com.tencent.plus.gray_disable.png";
+    
+    public static final String PARAM_AVATAR_URI = "picture";
+}

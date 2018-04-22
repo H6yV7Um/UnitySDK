@@ -1,0 +1,235 @@
+<?xml version="1.0" ?>
+<project name="build_common_sdk_lite" default="" basedir=".">
+
+	<!-- ######属性定义部分###### -->
+	<!-- 时间戳属性定义，用于包的文件名 -->
+	<tstamp>
+		<format property="build_date" pattern="yyyyMMddHHmmss" />
+		<format property="build_number" pattern="yyyyMMdd" />
+	</tstamp>
+
+	<!-- SDK lite包编译目录 -->
+	<property name="lite_sdk_temp" value="${sdk_project_path}/lite_sdk" />
+	
+	<!-- 项目的目录属性定义 -->
+	<property name="lite_sdk_src" value="${lite_sdk_temp}/src" />
+	<!-- 源代码 -->
+	<property name="lite_sdk_res" value="${lite_sdk_temp}/res" />
+	<!-- 资源 -->
+	<property name="lite_sdk_lib" value="${lite_sdk_temp}/libs" />
+	<!-- 库 -->
+	<property name="lite_sdk_libs" value="${lite_sdk_temp}/libs" />
+	<!-- .so库 -->
+	<property name="lite_sdk_assets" value="${lite_sdk_temp}/assets" />
+	<!-- assets -->
+	<property name="lite_sdk_bin" value="${lite_sdk_temp}/bin" />
+	<!-- 包目录 -->
+	<property name="lite_sdk_classes" value="${lite_sdk_temp}/classes" />
+	<!-- classes -->
+	<property name = "code_dog_sdk_lite_classes" value="${basedir}/codedog/sdkliteclasses" />
+	<!-- codedog sdk lite classes-->
+	<property name="lite_sdk_gen" value="${lite_sdk_bin}/gen" />
+	
+	<!-- constant文件路径 -->
+	<property name="constants_path" value="${lite_sdk_src}/com/tencent/connect/common/Constants.java" />
+	<property name="dex" value="${lite_sdk_bin}/classes.dex" />
+	
+	<!-- isAccurateTest:标识是否需要插桩 -->
+	<condition property="isAccurateTest" value="true" else="false">
+		<and>
+			<isset property="env.IS_INSERTLOG"/>
+			<istrue value="${env.IS_INSERTLOG}"/>
+		</and>
+	</condition>
+	
+	<!-- ###### Target定义部分 ###### -->
+	<!-- 初始化目录 -->
+	<target name="init_sdk_lite">
+		<echo>如果bin和lib目录不存在，则创建</echo>
+		<mkdir dir="${lite_sdk_temp}" />
+		<mkdir dir="${lite_sdk_bin}" />
+		<mkdir dir="${lite_sdk_lib}" />
+		<mkdir dir="${lite_sdk_libs}" />
+		
+		<copy todir="${lite_sdk_temp}" overwrite="true" encoding="${encoding}" >
+			<fileset dir="${sdk_project_path}" includes="**/**" />
+		</copy>
+
+		<echo>
+			清空bin和classes目录
+		</echo>
+		
+		<delete dir="${lite_sdk_classes}" />
+		<delete dir = "${code_dog_sdk_lite_classes}" /> <!-- delete codedog sdk lite classes-->
+		<delete dir="${lite_sdk_bin}" />
+		<delete dir="${lite_sdk_src}/com/tencent/open/qzone" />
+		<delete dir="${lite_sdk_src}/com/tencent/open/weiyun" />
+		<delete dir="${lite_sdk_src}/com/tencent/open/wpa" />
+		<delete dir="${lite_sdk_src}/com/tencent/open/yyb" />
+		<delete dir="${lite_sdk_src}/com/tencent/qqconnect" />
+		<!-- 保留日志相关类 -->
+		<!-- <delete dir="${lite_sdk_src}/com/tencent/record" /> -->
+			
+		<delete dir="${lite_sdk_src}/com/tencent/connect/avatar" />
+		<delete dir="${lite_sdk_src}/com/tencent/connect/dataprovider" />
+
+		<delete>
+			<fileset dir="${lite_sdk_assets}" includes="yyb*.png,*.png"/>
+			<fileset dir="${lite_sdk_src}/com/tencent/open" includes="LbsAgent.java,LocationApi.java,SosoLocationListener.java,TaskGuide.java,ConfirmDialog.java,GameAppOperation.java,TaskRequestListener.java,VoiceHelper.java" />
+		</delete>
+		
+		<replaceregexp match="//\[liteexludestart\][\s\S]*//\[liteexludeend\]" replace="" encoding="${encoding}" >
+			<fileset dir="${lite_sdk_src}/com/tencent/open" includes="*.java" />
+			<fileset dir="${lite_sdk_src}/com/tencent/tauth" includes="*.java" />
+            <fileset dir="${lite_sdk_src}/com/tencent/connect" includes="*.java" />
+		</replaceregexp>
+		
+		<replaceregexp file="${lite_sdk_src}/com/tencent/open/SocialApiIml.java"
+							   match="import\s([a-z]+\.)+(VoiceHelper)(\.[a-zA-Z]+)?;"
+							   replace=""
+							   byline="true"
+							   encoding="${encoding}" />
+		
+		<replaceregexp file="${lite_sdk_src}/com/tencent/tauth/Tencent.java"
+							   match="import\s([a-z]+\.)+((yyb)|(avatar)|(LocationApi)|(TaskGuide)|(WPA)|(GameAppOperation))(\.[a-zA-Z]+)?;"
+							   replace=""
+							   byline="true"
+							   encoding="${encoding}" />
+		<!-- 修改版本号，标示是lite版本 -->
+		<replaceregexp file="${constants_path}"
+				   match="ISLITE(\s*)=.*;"
+				   replace="ISLITE=true;"
+				   byline="true"
+				   encoding="${encoding}"/>
+		
+		<mkdir dir="${lite_sdk_classes}" />
+		<mkdir dir = "${code_dog_sdk_lite_classes}" /> <!-- mkdir codedog sdk lite classes-->
+		<mkdir dir="${lite_sdk_gen}" />
+	</target>
+
+
+	<!-- 为该项目资源生成R.java文件 -->
+	<target name="generate_sdk_lite">
+		<echo>Generating R.java / Manifest.java from the resources...</echo>
+		<exec executable="${aapt}" failonerror="true">
+			<arg value="package" />
+			<arg value="-m" />
+			<arg value="-J" />
+			<arg value="${lite_sdk_gen}" />
+			<arg value="-M" />
+			<arg value="${lite_sdk_temp}/AndroidManifest.xml" />
+			<arg value="-S" />
+			<arg value="${lite_sdk_res}" />
+			<arg value="-I" />
+			<arg value="${androidjar}" />
+		</exec>
+	</target>
+	
+	<!-- 编译项目的.java文件为.class文件 -->
+	<target name="compile_sdk_lite">
+		<echo>开始编译...</echo>
+		<javac encoding="${encoding}" debug="true" extdirs="" source="1.6" target="1.6" destdir="${lite_sdk_classes}" bootclasspath="${androidjar}"  includeantruntime="on">
+			<src path="${lite_sdk_src}" />
+			<src path="${lite_sdk_gen}" />
+			<classpath>
+				<fileset dir="${lite_sdk_lib}" includes="*.jar" />
+				<fileset dir="${lite_sdk_temp}/extralib" includes="annotations.jar" />
+			</classpath>
+		</javac>
+		<echo>结束编译...</echo>
+		<echo>开始拷贝sdk lite classes...</echo>
+		<copy todir="${code_dog_sdk_lite_classes}" filtering="true">
+			<fileset dir="${lite_sdk_classes}">
+				<include name="**/*" />
+			</fileset>
+		</copy>
+		<echo>结束拷贝sdk lite classes...</echo>
+	</target>
+
+	<!-- 打包 -->
+	<target name="package_sdk_lite">
+		<jar basedir="${lite_sdk_classes}" destfile="temp.jar">
+		     <fileset dir="${lite_sdk_temp}">
+		         <include name="assets/*" />
+		     </fileset>
+		</jar>
+	</target>
+
+	<!-- 对打包后的结果进行混淆 -->
+	<target name="obfuscate_sdk_lite">
+		<java jar="${proguard_home}/lib/proguard.jar" fork="true" failonerror="true">
+			<jvmarg value="-Dmaximum.inlined.code.length=32" />
+			
+			<!-- 保证不同业务混淆后类名冲突 -->
+			<arg value="-keeppackagenames com.tencent.open"/>
+			<arg value="-keeppackagenames com.tencent.connect"/>
+			
+			<arg value="-injars temp.jar" />
+			<arg value="-outjars obfuscated.jar" />
+			<arg value="-libraryjars ${androidjar}" />
+			<arg value="-libraryjars ${lite_sdk_lib}" />
+			<arg value="-libraryjars ${lite_sdk_temp}/extralib/annotations.jar" />
+
+			<!-- <arg value="-dontpreverify"/> -->
+			<arg value="-dontoptimize" />
+			<arg value="-dontusemixedcaseclassnames" />
+			<arg value="-keepattributes Exceptions,InnerClasses,Signature,Deprecated,SourceFile,LineNumberTable,*Annotation*,EnclosingMethod"/>
+			
+			<arg value="-keepclasseswithmembernames class * extends com.tencent.connect.common.BaseApi{public &lt;methods&gt;;}" />
+			<arg value="-keepclasseswithmembernames class * extends com.tencent.connect.common.BaseApi{public *;}" />
+			
+			<arg value="-keep class * extends com.tencent.connect.common.BaseApi{public *;}"/>
+	
+			<arg value="-keep class com.tencent.connect.common.* {public *;}"/>
+			<arg value="-keep class com.tencent.connect.UserInfo{public *;}"/>
+			<!-- <arg value="-keep class com.tencent.connect.auth.* {public *;}"/> -->
+			<arg value="-keep class com.tencent.connect.auth.QQToken {public *;}" />
+			
+			<!-- <arg value="-keep class com.tencent.open.utils.*{public *;}"/> -->
+			<arg value="-keep class com.tencent.open.utils.HttpUtils {public *;}" />
+			<arg value="-keep class com.tencent.open.utils.HttpUtils$HttpStatusException {public *;}" />
+			<arg value="-keep class com.tencent.open.utils.HttpUtils$NetworkUnavailableException {public *;}" />
+			
+			<arg value="-keep class com.tencent.open.SocialApi{public *;}"/>
+			<arg value="-keep class com.tencent.open.SocialConstants {public *;}"/>
+			<arg value="-keep class com.tencent.open.TDialog$*"/>
+			<arg value="-keep class com.tencent.open.TDialog$* {public *;}"/>
+						
+			<!-- <arg value="-keep class com.tencent.open.PKDialog"/>
+			<arg value="-keep class com.tencent.open.PKDialog {*;}"/>
+			<arg value="-keep class com.tencent.open.PKDialog$*"/>
+			<arg value="-keep class com.tencent.open.PKDialog$* {*;}"/> -->
+			
+			<arg value="-keep class com.tencent.open.ServerSetting"/>
+			<arg value="-keep class com.tencent.open.ServerSetting {public *;}"/>
+			
+			<arg value="-keep class com.tencent.tauth.*" />
+			<arg value="-keep class com.tencent.tauth.* {public *;}" />
+			
+			<arg value="-keep class com.tencent.open.web.security.SecureJsInterface {public *;} " />
+			<arg value="-keep class com.tencent.open.web.security.JniInterface {public *;} " />
+			
+			<arg value="-keepattributes InnerClasses" />
+
+			<arg value="-keep class * implements android.os.Parcelable {public static final android.os.Parcelable$Creator *;}"/>
+			<arg value="-printmapping mappingfile.txt" />
+			<!-- <arg value="-optimizationpasses 7"/>  -->
+			<arg value="-verbose" />
+			<arg value="-dontskipnonpubliclibraryclasses" />
+			<arg value="-dontskipnonpubliclibraryclassmembers" />
+			<arg value="-printmapping ${lite_sdk_bin}/mapping.txt" />
+			<arg value="-renamesourcefileattribute ProGuard" />
+			<arg value="-keepattributes SourceFile,LineNumberTable" />
+		</java>
+		<delete file="temp.jar" />
+		<delete dir="${lite_sdk_classes}" />
+	</target>
+
+	<!-- 拷贝apk到测试目录 -->
+	<target name="copy_to_testdir_sdk_lite">
+		<copy file="${lite_sdk_bin}/mapping.txt" tofile="${output_path}/sdk_mapping_lite.txt" />
+		<copy file="obfuscated.jar" tofile="${output_path}/${sdk_file_name_lite}.jar" />
+		<delete file="obfuscated.jar" />
+		<delete dir="${lite_sdk_temp}" />
+	</target>
+</project>

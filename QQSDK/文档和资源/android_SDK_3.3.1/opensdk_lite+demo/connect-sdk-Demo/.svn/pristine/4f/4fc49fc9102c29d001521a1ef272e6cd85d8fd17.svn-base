@@ -1,0 +1,506 @@
+package com.tencent.open.report;
+
+import com.tencent.open.log.SLog;
+
+import android.content.Context;
+import android.database.Cursor;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
+import android.net.Uri;
+/**
+ * APN工具类
+ * <p>
+ *
+ * </p>
+ */
+public class APNUtil {
+
+	private static final String TAG = SLog.TAG + ".APNUtil";
+	/**
+	 * cmwap
+	 */
+	public static final int MPROXYTYPE_CMWAP = 1;
+	/**
+	 * wifi
+	 */
+	public static final int MPROXYTYPE_WIFI = 2;
+	/**
+	 * cmnet
+	 */
+	public static final int MPROXYTYPE_CMNET = 4;
+	/**
+	 * uninet服务器列表
+	 */
+	public static final int MPROXYTYPE_UNINET = 8;
+	/**
+	 * uniwap服务器列表
+	 */
+	public static final int MPROXYTYPE_UNIWAP = 16;
+	/**
+	 * net类服务器列表
+	 */
+	public static final int MPROXYTYPE_NET = 32;
+	/**
+	 * wap类服务器列表
+	 */
+	public static final int MPROXYTYPE_WAP = 64;
+	/**
+	 * 默认服务器列表
+	 */
+	public static final int MPROXYTYPE_DEFAULT = 128;
+	/**
+	 * cmda net
+	 */
+	public static final int MPROXYTYPE_CTNET = 256;
+	/**
+	 * cmda wap
+	 */
+	public static final int MPROXYTYPE_CTWAP = 512;
+	/**
+	 * 联通 3gwap
+	 */
+	public static final int MPROXYTYPE_3GWAP = 1024;
+	/**
+	 * 联通 3gnet
+	 */
+	public static final int MPROXYTYPE_3GNET = 2048;
+
+	public static final String ANP_NAME_WIFI = "wifi"; // 中国移动wap APN名称
+	public static final String ANP_NAME_CMWAP = "cmwap"; // 中国移动wap APN名称
+	public static final String ANP_NAME_CMNET = "cmnet"; // 中国移动net APN名称
+	public static final String ANP_NAME_UNIWAP = "uniwap"; // 中国联通wap APN名称
+	public static final String ANP_NAME_UNINET = "uninet"; // 中国联通net APN名称
+	public static final String ANP_NAME_WAP = "wap"; // 中国电信wap APN名称
+	public static final String ANP_NAME_NET = "net"; // 中国电信net APN名称
+	public static final String ANP_NAME_CTWAP = "ctwap"; // wap APN名称
+	public static final String ANP_NAME_CTNET = "ctnet"; // net APN名称
+	public static final String ANP_NAME_NONE = "none"; // net APN名称
+	public static final String ANP_NAME_3GNET="3gnet";
+	public static final String ANP_NAME_3GWAP ="3gwap";
+
+
+	public static final String NETWORK_TYPE_UNCONNECTED = "unconnect";
+	public static final String NETWORK_TYPE_UNKNOWN = "unknown";
+	public static final String NETWORK_TYPE_WIFI = "wifi";
+	public static final String NETWORK_TYPE_2G = "2g";
+	public static final String NETWORK_TYPE_3G = "3g";
+	public static final String NETWORK_TYPE_4G = "4g";
+
+	// apn地址
+    protected static final Uri PREFERRED_APN_URI = Uri
+	.parse("content://telephony/carriers/preferapn");
+
+	// apn属性类型
+	public static final String APN_PROP_APN = "apn";
+	// apn属性代理
+	public static final String APN_PROP_PROXY = "proxy";
+	// apn属性端口
+	public static final String APN_PROP_PORT = "port";
+
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_NONE   = 0 ;//未知类型
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_CMNET  = 1 ;//cmnet
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_CMWAP  = 2 ;//cmwap
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_WIFI   = 3 ;//WiFi
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_UNINET = 4 ;//uninet
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_UNIWAP = 5 ;//uniwap
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_NET    = 6 ;//net类接入点
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_WAP    = 7 ;//wap类接入点
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_CTNET = 8; //ctnet
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_CTWAP = 9; //ctwap
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_3GWAP = 10; //3gwap
+// TODO Remove unused code found by UCDetector
+// 	public static final byte APNTYPE_3GNET = 11; //3gnet
+
+
+	/**
+	 * 获取自定义APN名称
+	 *
+	 * @param context
+	 * @return
+	 */
+	public static String getApnName(Context context) {
+		final int netType = getMProxyType(context);
+
+		if(netType == MPROXYTYPE_WIFI){
+			return ANP_NAME_WIFI;
+		}else if (netType == MPROXYTYPE_CMWAP) {
+			return ANP_NAME_CMWAP;
+		} else if (netType == MPROXYTYPE_CMNET) {
+			return ANP_NAME_CMNET;
+		} else if (netType == MPROXYTYPE_UNIWAP) {
+			return ANP_NAME_UNIWAP;
+		} else if (netType == MPROXYTYPE_UNINET) {
+			return ANP_NAME_UNINET;
+		}else if (netType == MPROXYTYPE_WAP) {
+			return ANP_NAME_WAP;
+		} else if (netType == MPROXYTYPE_NET) {
+			return ANP_NAME_NET;
+		} else if (netType == MPROXYTYPE_CTWAP) {
+			return ANP_NAME_CTWAP;
+		} else if (netType == MPROXYTYPE_CTNET) {
+			return ANP_NAME_CTNET;
+		} else if(netType == MPROXYTYPE_3GNET){
+		    return ANP_NAME_3GNET;
+		}else if(netType == MPROXYTYPE_3GWAP){
+		    return ANP_NAME_3GWAP;
+		}
+		//获取系统apn名称
+		final String apn = getApn(context);
+		if(apn == null || apn.length() == 0){
+		    return ANP_NAME_NONE;
+		}
+		return apn;
+
+
+	}
+// TODO Remove unused code found by UCDetector
+//     /**
+//      * 获取自定义当前联网类型
+//      *
+//      * @return 网络类型。-1为网络不可用；0为未知网络；1为WIFI；2为2G；3为3G；4为4G
+//      */
+//     public static String getNetworkType() {
+//
+//         try {
+//
+//             if (CommonDataAdapter.getInstance().getContext() != null) {
+//
+//                 ConnectivityManager connectivity = (ConnectivityManager) CommonDataAdapter.getInstance().getContext()
+//                         .getSystemService(Context.CONNECTIVITY_SERVICE);
+//                 if (connectivity == null) {
+//                     return NETWORK_TYPE_UNKNOWN;
+//                 }
+//
+//                 NetworkInfo activeNetInfo = connectivity.getActiveNetworkInfo();
+//                 if (activeNetInfo == null) {
+//                     return NETWORK_TYPE_UNCONNECTED;
+//                 }
+//
+//                 if (!activeNetInfo.isAvailable() || !activeNetInfo.isConnected()) {
+//                     return NETWORK_TYPE_UNCONNECTED;
+//                 }
+//
+//                 if (activeNetInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+//
+//                     return NETWORK_TYPE_WIFI;
+//                 } else if (activeNetInfo.getType() == ConnectivityManager.TYPE_MOBILE) {
+//                     switch (activeNetInfo.getSubtype()) {
+//                         case TelephonyManager.NETWORK_TYPE_CDMA:// ~ 14-64 kbps
+//                         case  11://TelephonyManager.NETWORK_TYPE_IDEN:// ~25 kbps api level 8才有此值
+//                         case TelephonyManager.NETWORK_TYPE_1xRTT:// ~ 50-100
+//                                                                  // kbps
+//                         case TelephonyManager.NETWORK_TYPE_EDGE:// ~ 50-100 kbps
+//                         case TelephonyManager.NETWORK_TYPE_GPRS:// ~ 100 kbps
+//                             return NETWORK_TYPE_2G;
+//
+//                         case TelephonyManager.NETWORK_TYPE_EVDO_0:// ~ 400-1000
+//                                                                   // kbps
+//                         case TelephonyManager.NETWORK_TYPE_UMTS:// ~ 400-7000
+//                                                                 // kbps
+//                         case TelephonyManager.NETWORK_TYPE_EVDO_A:// ~ 600-1400
+//                                                                   // kbps
+//                         case TelephonyManager.NETWORK_TYPE_HSPA:// ~ 700-1700
+//                                                                 // kbps
+//                         case TelephonyManager.NETWORK_TYPE_HSUPA:// ~ 1-23 Mbps
+//                         case TelephonyManager.NETWORK_TYPE_HSDPA:// ~ 2-14 Mbps
+//                         case 15: // 对应TelephonyManager.NETWORK_TYPE_HSPAP: //
+//                                  // 在api level 13下没有此值，但存在此网络类型，下面直接用数值代替
+//                             return NETWORK_TYPE_3G;
+//                         case 13: // 对应TelephonyManager.NETWORK_TYPE_LTE
+//                             return NETWORK_TYPE_4G;
+//                         case TelephonyManager.NETWORK_TYPE_UNKNOWN:
+//                         default:
+//                             return NETWORK_TYPE_UNKNOWN;
+//                     }
+//                 } else {
+//                     return NETWORK_TYPE_UNKNOWN;
+//                 }
+//             }
+//         } catch (Exception e) {
+//             //SLog.e(TAG, ">>> getNetworkType()异常:" + e.getMessage());
+//             e.printStackTrace();
+//         }
+//
+//         return NETWORK_TYPE_UNCONNECTED;
+//     }
+// TODO Remove unused code found by UCDetector
+//     /**返回上報所需apn,這里會返回如下格式數據2g#gprs、3g#3gnet這種*/
+//     public static String getReportApn(){
+//     	String netType = getNetworkType();
+//     	String apnName = getApnName(CommonDataAdapter.getInstance().getContext());
+//     	return netType+"#"+apnName;
+//     }
+	/**
+	 * 获取系统APN
+	 * @param context
+	 * @return
+	 */
+	public static String getApn(Context context){
+		try {
+			final Cursor c = context.getContentResolver().query(PREFERRED_APN_URI, null,
+					null, null, null);
+			if (c == null) {
+				return null;
+			}
+			c.moveToFirst();
+			if (c.isAfterLast()) {
+				if(c != null){
+					c.close();
+				}
+				return null;
+			}
+
+			final String strResult = c.getString(c.getColumnIndex(APN_PROP_APN));
+			if(c != null){
+				c.close();
+			}
+			return strResult;
+		} catch (final SecurityException e) {
+			// TODO: handle exception
+            SLog.e(TAG, "getApn has exception: " + e.getMessage());
+		} catch (Exception e) {
+			SLog.e(TAG, "getApn has exception: " + e.getMessage()); //maybe CursorIndexOutOfBoundsException
+		}
+		return "";
+	}
+
+
+	/**
+	 * 获取系统APN代理IP
+	 * @param context
+	 * @return
+	 */
+	public static String getApnProxy(Context context) {
+	    try {
+	        final Cursor c = context.getContentResolver().query(PREFERRED_APN_URI, null,
+	                null, null, null);
+	        if (c == null) {
+	            return null;
+	        }
+	        c.moveToFirst();
+	        if (c.isAfterLast()) {
+	            if(c != null){
+	                c.close();
+	            }
+	            return null;
+	        }
+	        final String strResult = c.getString(c.getColumnIndex(APN_PROP_PROXY));
+	        if(c != null){
+	            c.close();
+	        }
+	        return strResult;
+        } catch (final SecurityException e) {
+            SLog.e(TAG, "getApnProxy has exception: " + e.getMessage());
+	    }
+        return "";
+	}
+
+	/**
+	 * 获取系统APN代理端口
+	 *
+	 * @param context
+	 * @return
+	 */
+	public static String getApnPort(Context context) {
+		final Cursor c = context.getContentResolver().query(PREFERRED_APN_URI, null,
+				null, null, null);
+		if (c == null) {
+			return null;
+		}
+		c.moveToFirst();
+		if (c.isAfterLast()) {
+			if(c != null){
+				c.close();
+			}
+			return "80";
+		}
+
+		String port = null;
+		port = c.getString(c.getColumnIndex(APN_PROP_PORT));
+		if(port == null){
+			port = "80";
+		}
+		if(c != null){
+			c.close();
+		}
+		return port;
+	}
+
+	/**
+	 * 获取系统APN代理端口
+	 *
+	 * @param context
+	 * @return
+	 */
+	public static int getApnPortInt(Context context) {
+		final Cursor c = context.getContentResolver().query(PREFERRED_APN_URI, null,
+				null, null, null);
+		if (c == null) {
+			return -1;
+		}
+		c.moveToFirst();
+		if (c.isAfterLast()) {
+			if(c != null){
+				c.close();
+			}
+			return -1;
+		}
+		final int result = c.getInt(c.getColumnIndex(APN_PROP_PORT));
+		if(c != null){
+			c.close();
+		}
+		return result;
+	}
+
+	/**
+	 * 是否有网关代理
+	 *
+	 * @param context
+	 * @return
+	 */
+	public static boolean hasProxy(Context context) {
+		final int netType = getMProxyType(context);
+		if (netType == MPROXYTYPE_CMWAP || netType == MPROXYTYPE_UNIWAP
+				|| netType == MPROXYTYPE_WAP || netType == MPROXYTYPE_CTWAP || netType == MPROXYTYPE_3GWAP) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * 获取自定义当前联网类型
+	 *
+	 * @param act
+	 *            当前活动Activity
+	 * @return 联网类型 -1表示未知的联网类型, 正确类型： MPROXYTYPE_WIFI | MPROXYTYPE_CMWAP |
+	 *         MPROXYTYPE_CMNET
+	 */
+	public static int getMProxyType(Context act) {
+		try {
+			final ConnectivityManager cm = (ConnectivityManager) act.getSystemService(Context.CONNECTIVITY_SERVICE);
+			if(cm == null) {
+                return MPROXYTYPE_DEFAULT;
+            }
+
+			final NetworkInfo info = cm.getActiveNetworkInfo();
+			if(info == null) {
+                return MPROXYTYPE_DEFAULT;
+            }
+			final String typeName = info.getTypeName();
+			if (typeName.toUpperCase().equals("WIFI")) { // wifi网络
+				return MPROXYTYPE_WIFI;
+			} else {
+				final String extraInfo = info.getExtraInfo().toLowerCase();
+				if (extraInfo.startsWith("cmwap")) { // cmwap
+					return MPROXYTYPE_CMWAP;
+				} else if (extraInfo.startsWith("cmnet")
+						|| extraInfo.startsWith("epc.tmobile.com")) { // cmnet
+					return MPROXYTYPE_CMNET;
+				} else if (extraInfo.startsWith("uniwap")) {
+					return MPROXYTYPE_UNIWAP;
+				} else if (extraInfo.startsWith("uninet")) {
+					return MPROXYTYPE_UNINET;
+				} else if (extraInfo.startsWith("wap")) {
+					return MPROXYTYPE_WAP;
+				} else if (extraInfo.startsWith("net")) {
+					return MPROXYTYPE_NET;
+				} else if(extraInfo.startsWith("ctwap")){
+					return MPROXYTYPE_CTWAP;
+				}else if(extraInfo.startsWith("ctnet")){
+					return MPROXYTYPE_CTNET;
+				} else if(extraInfo.startsWith("3gwap")) {
+					return MPROXYTYPE_3GWAP;
+				} else if(extraInfo.startsWith("3gnet")) {
+					return MPROXYTYPE_3GNET;
+				}
+				else if (extraInfo.startsWith("#777")) { // cdma
+					final String proxy = getApnProxy(act);
+					if (proxy != null && proxy.length() > 0) {
+						return MPROXYTYPE_CTWAP;
+					} else {
+						return MPROXYTYPE_CTNET;
+					}
+				}
+			}
+		} catch (final Exception e) {
+            SLog.e(TAG, "getMProxyType has exception: " + e.getMessage());
+		}
+		return MPROXYTYPE_DEFAULT;
+	}
+
+	/**
+	 * @param context
+	 * @return
+	 */
+	public static String getNetWorkName(Context context){
+		final ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+		if(cm == null) {
+            return "MOBILE";
+        }
+		final NetworkInfo info = cm.getActiveNetworkInfo();
+		if(info != null) {
+            return info.getTypeName();
+        } else {
+            return "MOBILE";
+        }
+	}
+
+	/**
+	 * 检测是否有网络
+	 * @param c
+	 * @return
+	 */
+	public static boolean isNetworkAvailable(Context act) {
+		final ConnectivityManager cm = (ConnectivityManager) act.getSystemService(Context.CONNECTIVITY_SERVICE);
+		if(cm == null) {
+            return false;
+        }
+		final NetworkInfo info = cm.getActiveNetworkInfo();
+		if(info != null && info.isAvailable()) {
+            return true;
+        }
+		return false;
+	}
+
+	 /** 检测是否wifi */
+    public static boolean isWifiWorking(Context ctx) {
+        final ConnectivityManager connectivityManager = (ConnectivityManager) ctx
+                .getSystemService(Context.CONNECTIVITY_SERVICE);
+        final NetworkInfo activeNetInfo = connectivityManager.getActiveNetworkInfo();
+        if (activeNetInfo != null
+                && activeNetInfo.getType() == ConnectivityManager.TYPE_WIFI) {
+            return true;
+        }
+        return false;
+    }
+    /**检测网络是否可用*/
+    public static boolean checkNetWork(Context context) {
+    	final ConnectivityManager connectivity = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+		if (connectivity == null) {
+			return true;
+		}
+		else {
+			final NetworkInfo[] info = connectivity.getAllNetworkInfo();
+			if (info != null) {
+				for (int i = 0; i < info.length; i++) {
+					if (info[i].isConnectedOrConnecting()) {
+						return true;
+					}
+				}
+			}
+		}
+		return false;
+    }
+
+}

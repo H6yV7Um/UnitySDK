@@ -1,0 +1,392 @@
+package com.tencent.connect.common;
+
+import android.app.Activity;
+import android.app.ProgressDialog;
+import android.content.Context;
+import android.content.Intent;
+import android.content.SharedPreferences;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Message;
+import android.support.v4.app.Fragment;
+import android.text.TextUtils;
+
+import com.tencent.connect.auth.QQAuth;
+import com.tencent.connect.auth.QQToken;
+import com.tencent.open.TDialog;
+import com.tencent.tauth.IRequestListener;
+import com.tencent.tauth.IUiListener;
+import com.tencent.tauth.UiError;
+import com.tencent.open.log.SLog;
+import com.tencent.open.utils.Global;
+import com.tencent.open.utils.HttpUtils;
+import com.tencent.open.utils.ServerSetting;
+import com.tencent.open.utils.SystemUtils;
+import com.tencent.open.utils.Util;
+import com.tencent.open.utils.HttpUtils.HttpStatusException;
+import com.tencent.open.utils.HttpUtils.NetworkUnavailableException;
+
+import org.apache.http.conn.ConnectTimeoutException;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.IOException;
+import java.net.MalformedURLException;
+import java.net.SocketTimeoutException;
+
+public abstract class BaseApi {
+	private static final String TAG = SLog.TAG + ".BaseApi";
+	
+	private static final String KEY_REQUEST_CODE = "key_request_code";
+	protected static final String DEFAULT_PF = "openmobile_android";
+	protected static final String PREFERENCE_PF = "pfStore";
+    protected static final String ACTIVITY_ENCRY_TOKEN = "com.tencent.open.agent.EncryTokenActivity";
+    protected static final String ACTIVITY_AGENT = "com.tencent.open.agent.AgentActivity";
+    protected static final String ACTION_CHECK_TOKEN = "action_check_token";
+    protected static final String PARAM_ENCRY_EOKEN = "encry_token";
+
+	private static final int MSG_COMPLETE = 0;
+
+	protected QQAuth	mQQAuth; // add this member for some api need to do relogin,
+								  // could be null if not need relogin.
+	protected QQToken mToken;
+//	protected Context	mContext;
+	
+	//add by jackrex for oem
+	public static String registerChannel=null;
+	public static String installChannel=null;
+	public static String businessId=null;
+	public static boolean isOEM=false;
+
+	// 版本号和平台 for oem
+	protected static final String VERSION="android";
+	protected static final String PLATFORM="desktop_m_qq";
+
+	protected ProgressDialog mProgressDialog;
+
+	public BaseApi(QQAuth qqAuth, QQToken token) {
+		mQQAuth = qqAuth;
+		mToken = token;		
+	}
+
+	public BaseApi(QQToken token) {
+		this(null, token);
+	}
+
+	@SuppressWarnings("deprecation")
+	protected Bundle composeCGIParams() {
+		final Bundle bundle = new Bundle();
+		//填上通用参数, 后台可能会对不同版本的请求做策略控制
+		bundle.putString("format", "json");
+        bundle.putString("status_os", android.os.Build.VERSION.RELEASE);
+		bundle.putString("status_machine", android.os.Build.MODEL);
+		bundle.putString("status_version", android.os.Build.VERSION.SDK);
+		bundle.putString("sdkv", Constants.SDK_VERSION);
+		bundle.putString("sdkp", "a");
+		if (mToken != null && mToken.isSessionValid()) {
+			bundle.putString(Constants.PARAM_ACCESS_TOKEN, mToken.getAccessToken());
+			bundle.putString(Constants.PARAM_CONSUMER_KEY, mToken.getAppId());
+			bundle.putString(Constants.PARAM_OPEN_ID, mToken.getOpenId());
+
+            // 此字段在openUrl2中取出，在获取config时填入，但不放在cgi请求参数中
+            bundle.putString("appid_for_getting_config", mToken.getAppId());
+		}
+
+        // 从本地sharedpreference取出pf，填入params中
+        final SharedPreferences pfShared = Global.getContext().getSharedPreferences(
+                Constants.PREFERENCE_PF,
+                Context.MODE_PRIVATE);
+    	if (isOEM) {
+    		bundle.putString("pf", PLATFORM+"-"+installChannel+"-"+VERSION+"-"+registerChannel+"-"+businessId);
+		} else {
+			final String pf = pfShared.getString(Constants.PARAM_PLATFORM_ID, Constants.DEFAULT_PF);
+			bundle.putString(Constants.PARAM_PLATFORM_ID, pf);
+		}
+		return bundle;
+	}
+
+	protected String getCommonDownloadQQUrl(String needVersion) {
+		final Bundle params = composeCGIParams();
+		final StringBuilder builder = new StringBuilder();
+		if (!TextUtils.isEmpty(needVersion)) {
+		    params.putString("need_version", needVersion);
+       }
+		builder.append(ServerSetting.NEED_QQ_VERSION_TIPS_URL);
+        builder.append(HttpUtils.encodeUrl(params));
+        return builder.toString();
+	}
+
+	protected Bundle composeActivityParams() {
+		final Bundle bundle = new Bundle();
+		bundle.putString(Constants.PARAM_APP_ID, mToken.getAppId());
+        if (mToken.isSessionValid()) {
+        	bundle.putString(Constants.PARAM_KEY_STR,
+            		mToken.getAccessToken());
+        	bundle.putString(Constants.PARAM_KEY_TYPE, "0x80");
+        }
+        final String openId = mToken.getOpenId();
+        if (openId != null) {
+        	bundle.putString(Constants.PARAM_HOPEN_ID, openId);
+        }
+        bundle.putString(Constants.PARAM_PLATFORM, "androidqz");
+        // 从本地sharedpreference取出pf，填入params中
+        final SharedPreferences pfShared = Global.getContext().getSharedPreferences(
+                PREFERENCE_PF,
+                Context.MODE_PRIVATE);
+        if (isOEM) {
+    		bundle.putString("pf", PLATFORM+"-"+installChannel+"-"+VERSION+"-"+registerChannel+"-"+businessId);
+		} else {
+			final String pf = pfShared.getString(Constants.PARAM_PLATFORM_ID, DEFAULT_PF);
+			bundle.putString(Constants.PARAM_PLATFORM_ID, pf);
+			bundle.putString(Constants.PARAM_PLATFORM_ID, DEFAULT_PF);
+		}
+        bundle.putString("sdkv", Constants.SDK_VERSION);
+        bundle.putString("sdkp", "a");
+
+        return bundle;
+	}
+
+	private Intent getAssitIntent(Activity context, Intent activityIntent) {
+		final Intent intent = new Intent(context.getApplicationContext(), AssistActivity.class);
+		intent.putExtra(SystemUtils.IS_LOGIN, true);
+		intent.putExtra(AssistActivity.EXTRA_INTENT, activityIntent);
+		return intent;
+	}
+	
+	/*
+	 * 分享类型启动AssistActivity
+	 * 拉起手Q
+	 */
+	protected void startAssistActivity(Activity activity, int requestCode, Intent activityIntent,boolean mobileShare) {
+		Intent intent = new Intent(activity.getApplicationContext(), AssistActivity.class);
+		if (mobileShare) {
+			intent.putExtra(SystemUtils.IS_QQ_MOBILE_SHARE, true);
+		}
+		intent.putExtra(AssistActivity.EXTRA_INTENT, activityIntent);
+		activity.startActivityForResult(intent, requestCode);
+	}
+	
+	/*
+	 * 分享类型启动AssistActivity
+	 * 拉起H5
+	 */
+	protected void startAssistActivity(Activity activity, Bundle bundle, int requestCode, Intent activityIntent) {
+		Intent intent = new Intent(activity.getApplicationContext(), AssistActivity.class);
+		intent.putExtra(SystemUtils.H5_SHARE_DATA, bundle);
+		intent.putExtra(AssistActivity.EXTRA_INTENT, activityIntent);
+		
+		activity.startActivityForResult(intent, requestCode);
+	}
+	
+	protected void startAssitActivity(Activity activity, Intent activityIntent, int reqCode) {
+		activityIntent.putExtra(KEY_REQUEST_CODE, reqCode);
+
+		activity.startActivityForResult(getAssitIntent(activity,activityIntent), reqCode);
+	}
+
+	/**
+	 * 兼容fragment唤起的场景.
+	 */
+	protected void startAssitActivity(Fragment fragment, Intent activityIntent, int reqCode) {
+        activityIntent.putExtra(KEY_REQUEST_CODE, reqCode);
+
+        fragment.startActivityForResult(getAssitIntent(fragment.getActivity(),activityIntent), reqCode);
+    }
+
+	protected boolean hasActivityForIntent(Intent activityIntent) {
+		if (activityIntent != null) {
+			return SystemUtils.isActivityExist(Global.getContext(), activityIntent);
+		}
+
+		return false;
+	}
+
+
+
+	/**
+	 * 获取手Q或QZone中对应的Activity Intent，获取Intent的逻辑如下：<br>
+	 * <br>
+	 * <li>1、如果没有安装QZone，则从手机QQ获取Intent，如果还获取不到，则返回null；<br>
+	 * <br> <li>2、如果有安装QZone，则判断QZone版本号是否在3.4和后台配置的版本号（如果没有配置，则默认4.0）之间，如果在，
+	 * 直接从QZone获取Intent，<br>
+	 * <br> <li>3、如果QZone版本号不在指定的区间，则优先从手机QQ获取Intent，其次才从QZone获取，如果还获取不到，返回null。
+	 * <br>
+	 *
+	 * @return
+	 */
+	protected Intent getTargetActivityIntent(String targetActivity) {
+		final Intent qq_intent = new Intent();
+		if (Util.isTablet(Global.getContext())) {
+			// 兼容一下hd pad QQ
+			qq_intent.setClassName(Constants.PACKAGE_QQ_PAD, targetActivity);
+			if (SystemUtils.isActivityExist(Global.getContext(), qq_intent)) {
+				return qq_intent;
+			}
+		}
+		qq_intent.setClassName(Constants.PACKAGE_QQ, targetActivity);
+
+		//判断手Q是发存在并>=4.7，true则拉手Q agent
+		if (SystemUtils.isActivityExist(Global.getContext(), qq_intent)) {
+			return qq_intent;
+		}
+
+		//拉起TIM
+		qq_intent.setClassName(Constants.PACKAGE_TIM, targetActivity);
+		if (SystemUtils.isActivityExist(Global.getContext(), qq_intent)) {
+			return qq_intent;
+		}
+
+		//拉起QIM
+		qq_intent.setClassName(Constants.PACKAGE_QIM, targetActivity);
+		if (SystemUtils.isActivityExist(Global.getContext(), qq_intent)) {
+			return qq_intent;
+		}
+		
+		return null;
+	}
+
+	protected void handleDownloadLastestQQ(final Activity activity, Bundle params, final IUiListener listener) {
+		SLog.i(TAG, "--handleDownloadLastestQQ");
+	    final StringBuilder builder = new StringBuilder();
+        builder.append(ServerSetting.DOWNLOAD_QQ_URL);
+        builder.append(HttpUtils.encodeUrl(params));
+
+        final String actionUrl = builder.toString();
+
+	    final TDialog dlg = new TDialog(activity, "", actionUrl, null, mToken);
+	    dlg.show();
+
+    }
+
+	protected void showProgressDialog(Context context, String title,
+			String message) {
+		if (TextUtils.isEmpty(title)) {
+			title = "请稍候";
+		}
+		if (TextUtils.isEmpty(message)) {
+			message = "正在加载...";
+		}
+		mProgressDialog = ProgressDialog.show(context, title, message);
+		mProgressDialog.setCancelable(true);
+	}
+
+	/*protected Intent getAgentIntent() {
+		return getTargetActivityIntent(ACTIVITY_AGENT);
+	}*/
+
+	protected Intent getAgentIntentWithTarget(String targetActivity) {
+//		Intent agentIntent = getAgentIntent();
+	    Intent agentIntent = new Intent();
+
+	    final Intent targetIntent = getTargetActivityIntent(targetActivity);
+		if (targetIntent == null) {
+			agentIntent = null;
+		} else {
+            /**
+             * 必须保证返回的agent Intent和具体社交渠道API的intent的包名是相同的，因为手q和QZone都有agent，
+             * 但手q中的agent是没有社交渠道API的
+             */
+		    if(targetIntent.getComponent() != null) {
+		        agentIntent.setClassName(targetIntent.getComponent().getPackageName(), ACTIVITY_AGENT);
+		    } else {
+		        agentIntent = null;
+		    }
+		}
+
+		return agentIntent;
+	}
+
+	public void releaseResource() {
+
+	}	
+
+	public class TempRequestListener implements IRequestListener {
+		private final IUiListener mListener;
+		private final Handler mHandler;
+		public TempRequestListener(IUiListener listener) {
+			mListener = listener;
+			mHandler = new Handler(Global.getContext().getMainLooper()) {
+				@Override
+				public void handleMessage(Message msg) {
+					if (msg.what == 0) {
+						mListener.onComplete(msg.obj);
+					} else {
+						mListener.onError(new UiError(msg.what, (String) msg.obj, null));
+					}
+				}
+			};
+		}
+
+		@Override
+		public void onComplete(JSONObject response) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = response;
+			msg.what = MSG_COMPLETE;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onIOException(IOException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_IO;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onMalformedURLException(MalformedURLException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_URL;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onJSONException(JSONException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_JSON;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onConnectTimeoutException(ConnectTimeoutException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_CONNECTTIMEOUT;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onSocketTimeoutException(SocketTimeoutException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_SOCKETTIMEOUT;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onNetworkUnavailableException(NetworkUnavailableException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_NETWORK_UNAVAILABLE;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onHttpStatusException(HttpStatusException e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_HTTPSTATUS_ERROR;
+			mHandler.sendMessage(msg);
+		}
+
+		@Override
+		public void onUnknowException(Exception e) {
+			final Message msg = mHandler.obtainMessage();
+			msg.obj = e.getMessage();
+			msg.what = Constants.ERROR_UNKNOWN;
+			mHandler.sendMessage(msg);
+		}
+	}
+}

@@ -1,0 +1,268 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- 
+	文件名： build_common.xml
+	创建日期： 2010/4/8
+	描述：
+		 实际构建过程的定义。
+-->
+
+<project name="build_common_lite" default="" basedir=".">
+
+	<!-- Sample lite包编译目录 -->
+	<property name="lite_sample_temp" value="${sample_project_path}/lite_sample" />
+
+	<!-- ######属性定义部分###### -->
+	<!-- 项目的目录属性定义 -->
+	<property name="lite_src" value="${lite_sample_temp}/src" />
+	<!-- 源代码目录 -->
+	<property name="lite_res" value="${lite_sample_temp}/res" />
+	<!-- 资源 -->
+	<property name="lite_lib" value="${lite_sample_temp}/libs" />
+	<!-- 库 -->
+	<property name="lite_assets" value="${lite_sample_temp}/assets" />
+	<!-- assets -->
+	<property name="lite_bin" value="${lite_sample_temp}/bin" />
+	<!-- 包目录 -->
+	<property name="lite_classes" value="${lite_bin}/classes" />
+	<!-- classes -->
+	<property name = "code_dog_sample_lite_classes" value="${basedir}/codedog/sampleliteclasses" />
+	<!-- codedog sample lite classes-->
+	<property name="lite_gen" value="${lite_sample_temp}/gen" />
+	<!-- 生成R.java -->
+
+	<target name="init_lite">
+		<echo>初始化中...</echo>
+		<delete dir="${lite_bin}" />
+		<delete dir="${lite_lib}" />
+		<delete dir="${lite_classes}" />
+		<delete dir="${code_dog_sample_lite_classes}" /> <!-- delete codedog sample lite classes --> 
+		<delete dir="${lite_gen}" />
+		<delete dir="${lite_tempsrc}" />
+		
+		<mkdir dir="${lite_sample_temp}" />
+		
+		<mkdir dir="${lite_bin}" />
+		<mkdir dir="${lite_lib}" />
+		<mkdir dir="${lite_classes}" />
+		<mkdir dir="${code_dog_sample_lite_classes}" /> <!--  mkdir codedog sample lite classes --> 
+		<mkdir dir="${lite_gen}" />
+		
+		<copy todir="${lite_sample_temp}" overwrite="true" encoding="${encoding}" >
+			<fileset dir="${sample_project_path}" includes="**/**" />
+		</copy>
+		<copy file="${output_path}/${sdk_file_name_lite}.jar" tofile="${lite_lib}/${sdk_file_name_lite}.jar" />
+		<!-- 删除lite版本没有用到的类 -->
+		<delete file="${lite_lib}/${sdk_file_name}.jar" />
+		<delete>
+			<fileset dir="${lite_src}/com/tencent/sample/activitys" includes="AvatarActivity.java,OtherApiActivity.java,
+				QQGroupActivity.java,QzonePicturesActivity.java,SocialAppbarActivity.java,WPAActivity.java,GameLogicActivity.java,
+				QQFavoritesActivity.java,QQDatalineActivity.java, QQTroopBarActivity.java, SharePrizeActivity.java" />
+			<fileset dir="${lite_src}/com/tencent/sample" includes="BindGroupParamsDialog.java,AddFriendParamsDialog.java" />
+		</delete>
+		<delete dir="${lite_src}/com/tencent/sample/weiyun" />
+		
+		<!-- 删除没用到的java代码 -->
+		<echo>Delete liteexludestart_flag_one and liteexludestart_flag_one flag...</echo>
+		<replaceregexp match="//\[liteexludestart_flag_one\][\s\S]*//\[liteexludeend_flag_one\]" replace="" encoding="${encoding}" >
+			<fileset dir="${lite_src}/com/tencent/sample/activitys" includes="MainActivity.java,AccountInfoActivity.java" />
+		</replaceregexp>
+		<echo>Delete liteexludestartmeta and liteexludeendmeta flag...</echo>
+		<replaceregexp match="//\[liteexludestartmeta\][\s\S]*//\[liteexludeendmeta\]" replace="" encoding="${encoding}" >
+			<fileset dir="${lite_src}/com/tencent/sample/activitys" includes="MainActivity.java,SocialApiActivity.java,AccountInfoActivity.java" />
+		</replaceregexp>
+		<echo>Delete liteexludestart and liteexludeend flag...</echo>
+		<replaceregexp match="//\[liteexludestart\][\s\S]*//\[liteexludeend\]" replace="" encoding="${encoding}" >
+			<fileset dir="${lite_src}/com/tencent/sample/activitys" includes="MainActivity.java,SocialApiActivity.java,AccountInfoActivity.java" />
+		</replaceregexp>
+		<replaceregexp file="${lite_src}/com/tencent/sample/activitys/MainActivity.java"
+							   match="import\s([a-z]+\.)+(weiyun)(\.[a-zA-Z]+)?;"
+							   replace=""
+							   byline="true"
+							   encoding="${encoding}" />
+		<!-- 删除没用到的布局代码 -->
+		<replaceregexp match="\[liteexludestart\][\s\S]*\[liteexludeend\]" replace="" encoding="${encoding}" >
+			<fileset dir="${lite_res}/layout" includes="activity_main_new.xml" />
+			<fileset dir="${lite_res}/layout-hdpi" includes="social_api_activity.xml" />
+		</replaceregexp>
+	</target>
+
+	<!-- 为该项目资源生成R.java文件 -->
+	<target name="generate_lite">
+		<echo>Generating R.java / Manifest.java from the resources...</echo>
+		<exec executable="${aapt}" failonerror="true">
+			<arg value="package" />
+			<arg value="-m" />
+			<arg value="-J" />
+			<arg value="${lite_gen}" />
+			<arg value="-M" />
+			<arg value="${lite_sample_temp}/AndroidManifest.xml" />
+			<arg value="-S" />
+			<arg value="${lite_res}" />
+			<arg value="-I" />
+			<arg value="${androidjar}" />
+		</exec>
+	</target>
+
+	<!-- 从*.aidl文件生成java classes -->
+	<target name="aidl_lite">
+		<echo>Compiling aidl files into Java classes...</echo>
+		<apply executable="${aidl}" failonerror="true">
+			<!-- <arg value="-p${android_framework}" /> -->
+			<arg value="-I${lite_src}" />
+			<fileset dir="${lite_src}">
+				<include name="**/*.aidl" />
+			</fileset>
+		</apply>
+	</target>
+
+	<!-- 编译项目的.java文件为.class文件 -->
+	<target name="compile_lite">
+		<echo>开始编译...</echo>
+		<javac encoding="UTF-8" debug="true" extdirs="" target="1.6" destdir="${lite_classes}" bootclasspath="${androidjar}">
+			<src path="${lite_src}" />
+			<src path="${lite_gen}" />
+			<classpath>
+				<fileset dir="${lite_lib}" includes="*.jar" />
+			</classpath>
+		</javac>
+		<echo>结束编译...</echo>
+		<echo>开始拷贝sample lite classes...</echo>
+		<copy todir="${code_dog_sample_lite_classes}" filtering="true">
+			<fileset dir="${lite_classes}">
+				<include name="**/*" />
+			</fileset>
+		</copy>
+		<echo>结束拷贝sample lite classes...</echo>
+	</target>
+
+	<!-- 打包 -->
+	<target name="package_lite">
+		<jar basedir="${lite_classes}" destfile="temp.jar" />
+	</target>
+
+	<!-- 对打包后的结果进行混淆 -->
+	<target name="obfuscate_lite">
+		<java jar="${proguard_home}/lib/proguard.jar" fork="true" failonerror="true">
+			<jvmarg value="-Dmaximum.inlined.code.length=32" />
+			<arg value="-injars temp.jar" />
+			<arg value="-outjars obfuscated.jar" />
+			<arg value="-libraryjars ${androidjar}" />
+			<arg value="-libraryjars ${lite_lib}" />
+			<!-- <arg value="-libraryjars ${library-jar}/some_lib_used.jar"/> -->
+			<!-- <arg value="-dontpreverify"/> -->
+			<arg value="-dontoptimize" />
+			<arg value="-dontusemixedcaseclassnames" />
+			<arg value="-keep public class *" />
+			<!-- <arg value="-optimizationpasses 7"/>  -->
+			<arg value="-verbose" />
+			<arg value="-dontskipnonpubliclibraryclasses" />
+			<arg value="-dontskipnonpubliclibraryclassmembers" />
+		</java>
+		<delete file="temp.jar" />
+		<delete dir="${lite_classes}" />
+		<mkdir dir="${lite_classes}" />
+		<unzip src="obfuscated.jar" dest="${lite_classes}" />
+		<delete file="obfuscated.jar" />
+	</target>
+
+	<!-- 将该项目经过混淆的.class文件转换为.dex文件 -->
+	<target name="dex_lite">
+		<echo>Converting compiled files and external libraries into ${bin}/${dex}...</echo>
+		<apply executable="${dx}" failonerror="true" parallel="true">
+			<arg value="--dex" />
+			<arg value="--output=${dex}" />
+			<arg path="${lite_classes}" />
+			<fileset dir="${lite_lib}" includes="*.jar" />
+		</apply>
+	</target>
+
+	<!-- 打包项目的资源文件 -->
+	<target name="package_res_with_assets_lite">
+		<echo>Packaging resources and assets...</echo>
+		<exec executable="${aapt}" failonerror="true">
+			<arg value="package" />
+			<arg value="-f" />
+			<arg value="-M" />
+			<arg value="${lite_sample_temp}/AndroidManifest.xml" />
+			<arg value="-S" />
+			<arg value="${lite_res}" />
+			<arg value="-A" />
+			<arg value="${lite_assets}" />
+			<arg value="-I" />
+			<arg value="${androidjar}" />
+			<arg value="-F" />
+			<arg value="${lite_bin}/${project_name}.ap_" />
+		</exec>
+	</target>
+
+	<!-- 打包项目资源文件，但不包括assets -->
+	<target name="package_res_without_assets_lite">
+		<echo>Packaging resources...</echo>
+		<exec executable="${aapt}" failonerror="true">
+			<arg value="package" />
+			<arg value="-f" />
+			<arg value="-M" />
+			<arg value="${lite_sample_temp}/AndroidManifest.xml" />
+			<arg value="-S" />
+			<arg value="${lite_res}" />
+			<!-- No assets directory -->
+			<arg value="-I" />
+			<arg value="${androidjar}" />
+			<arg value="-F" />
+			<arg value="${lite_bin}/${project_name}.ap_" />
+		</exec>
+	</target>
+
+	<!-- 打包应用，此处不做签名，在后续的步骤中可以使用商业发布的密钥文件进行签名 -->
+	<target name="release_lite">
+		<echo>Packaging ${out-unsigned-package} for release...</echo>
+		<java classpath="${android_home}/tools/lib/sdklib.jar" classname="com.android.sdklib.build.ApkBuilderMain" failonerror="true">
+			<arg value="${lite_bin}/${sdk_file_name_lite}_unsigned.apk" />
+			<arg value="-u" />
+			<arg value="-z" />
+			<arg value="${lite_bin}/${project_name}.ap_" />
+			<arg value="-f" />
+			<arg value="${dex}" />
+			<arg value="-rf" />
+			<arg value="${lite_src}" />
+			<arg value="-rj" />
+			<arg value="${lite_lib}" />
+			<arg value="-nf" />
+			<arg value="${lite_lib}" />
+
+		</java>
+		<echo>It will need to be signed with jarsigner before being published.</echo>
+
+		<echo>仅保留apk文件...</echo>
+		<delete includeemptydirs="true">
+			<fileset dir="${lite_bin}" excludes="*.apk" />
+		</delete>
+	</target>
+
+	<!-- 签名 -->
+	<target name="sign_lite">
+		<echo>begin sign...</echo>
+		<exec executable="${signer}" failonerror="false">
+			<arg value="-verbose" />
+			<arg value="-keystore" />
+			<arg value="${keystore}" />
+			<arg value="-storepass" />
+			<arg value="${key_pass}" />
+			<arg value="-keypass" />
+			<arg value="${key_pass}" />
+			<arg value="-signedjar" />
+			<arg value="${lite_bin}/${sdk_file_name_lite}.apk" />
+			<arg value="${lite_bin}/${sdk_file_name_lite}_unsigned.apk" />
+			<arg value="${key_name}" />
+			<arg value="-digestalg"/>
+			<arg value="SHA1"/>
+			<arg value="-sigalg"/>
+			<arg value="MD5withRSA"/>
+		</exec>
+		<echo>end sign...</echo>
+		<copy file="${lite_bin}/${sdk_file_name_lite}.apk" tofile="${output_path}/${sample_file_name_lite}.apk" />
+		<delete dir="${lite_sample_temp}" />
+	</target>
+
+</project>
