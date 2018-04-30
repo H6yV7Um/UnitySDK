@@ -22,7 +22,7 @@ public class MainActivity extends UnityPlayerActivity {
 
 
     //显示弹窗
-    public void showToast(final String content,final int time) {
+    public void showToast(final String content, final int time) {
         new Handler(Looper.getMainLooper()).post(new Runnable() {
             @Override
             public void run() {
@@ -32,13 +32,10 @@ public class MainActivity extends UnityPlayerActivity {
         });
     }
 
-
-
     //获取当前时间
     public String getNowTime() {
-        long time =System.currentTimeMillis();
+        long time = System.currentTimeMillis();
         return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINESE).format(new Date(time));
     }
-
 
 }
